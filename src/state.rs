@@ -872,21 +872,63 @@ impl State {
     pub fn scroll_comments_down(&mut self) -> &mut Self {
         // For bottom-aligned scrolling, "down" (j key) = see newer comments = decrease index
         // Index 0 = newest (last item), higher = older
-        let total_comments = self.task_stories.len();
-        if total_comments > 0 && self.comments_scroll_offset > 0 {
-            self.comments_scroll_offset -= 1;
+        // Filter for actual comments to get the correct count
+        let comments: Vec<&Story> = self
+            .task_stories
+            .iter()
+            .filter(|s| match &s.resource_subtype {
+                Some(subtype) => subtype == "comment_added",
+                None => s.created_by.is_some(),
+            })
+            .collect();
+
+        let total_comments = comments.len();
+        if total_comments > 0 {
+            // Clamp offset to valid range first (in case it got out of bounds)
+            self.comments_scroll_offset = self.comments_scroll_offset % total_comments;
+
+            // Wrap around using modulo arithmetic (like other lists)
+            // If at 0, wrap to last item; otherwise decrease
+            if self.comments_scroll_offset == 0 {
+                self.comments_scroll_offset = total_comments.saturating_sub(1);
+            } else {
+                self.comments_scroll_offset -= 1;
+            }
+        } else {
+            // No comments, reset to 0
+            self.comments_scroll_offset = 0;
         }
         self
     }
 
     pub fn scroll_comments_up(&mut self) -> &mut Self {
         // For bottom-aligned scrolling, "up" (k key) = see older comments = increase index
-        let total_comments = self.task_stories.len();
+        // Filter for actual comments to get the correct count
+        let comments: Vec<&Story> = self
+            .task_stories
+            .iter()
+            .filter(|s| match &s.resource_subtype {
+                Some(subtype) => subtype == "comment_added",
+                None => s.created_by.is_some(),
+            })
+            .collect();
+
+        let total_comments = comments.len();
         if total_comments > 0 {
+            // Clamp offset to valid range first (in case it got out of bounds)
+            self.comments_scroll_offset = self.comments_scroll_offset % total_comments;
+
+            // Wrap around using modulo arithmetic (like other lists)
+            // If at max, wrap to 0; otherwise increase
             let max_index = total_comments.saturating_sub(1);
-            if self.comments_scroll_offset < max_index {
+            if self.comments_scroll_offset >= max_index {
+                self.comments_scroll_offset = 0;
+            } else {
                 self.comments_scroll_offset += 1;
             }
+        } else {
+            // No comments, reset to 0
+            self.comments_scroll_offset = 0;
         }
         self
     }

@@ -217,6 +217,35 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
             .alignment(Alignment::Center);
         frame.render_widget(text, chunks[0]);
     } else {
+        // Calculate available width for text (accounting for borders: 2 chars on each side)
+        let available_width = chunks[0].width.saturating_sub(4).max(10) as usize;
+        
+        // Helper function to wrap text to fit width
+        let wrap_text = |text: &str, width: usize| -> Vec<String> {
+            let mut wrapped = Vec::new();
+            for line in text.lines() {
+                if line.is_empty() {
+                    wrapped.push(String::new());
+                    continue;
+                }
+                let mut remaining = line;
+                while !remaining.is_empty() {
+                    if remaining.len() <= width {
+                        wrapped.push(remaining.to_string());
+                        break;
+                    }
+                    // Find the last space before the width limit
+                    let mut break_point = width;
+                    if let Some(last_space) = remaining[..width].rfind(' ') {
+                        break_point = last_space + 1;
+                    }
+                    wrapped.push(remaining[..break_point].trim_end().to_string());
+                    remaining = remaining[break_point..].trim_start();
+                }
+            }
+            wrapped
+        };
+
         // Create nice multi-line comment items with proper formatting
         let items: Vec<ListItem> = comments
             .iter()
@@ -239,13 +268,15 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
                     Span::styled(timestamp_str, Style::default().fg(Color::DarkGray)),
                 ]);
 
-                // Split comment text into lines and create Spans for each
-                let text_lines: Vec<Spans> = story
-                    .text
-                    .lines()
+                // Wrap comment text to fit available width
+                let wrapped_lines = wrap_text(&story.text, available_width);
+                
+                // Create Spans for each wrapped line
+                let text_lines: Vec<Spans> = wrapped_lines
+                    .iter()
                     .map(|line| {
                         Spans::from(Span::styled(
-                            line.to_string(),
+                            line.clone(),
                             styling::normal_text_style(),
                         ))
                     })
@@ -261,8 +292,15 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
 
         // Use ListState for proper item-by-item navigation
         // For bottom-aligned list: index 0 = newest (last item), higher = older
-        let selected_index = state.get_comments_scroll_offset();
+        let mut selected_index = state.get_comments_scroll_offset();
         let total_items = items.len();
+        
+        // Ensure selected_index is within bounds (wrap around if needed)
+        if total_items > 0 {
+            selected_index = selected_index % total_items;
+        } else {
+            selected_index = 0;
+        }
         
         // Create list with all items - tui-rs List widget handles scrolling automatically
         let list = List::new(items.clone())
