@@ -73,11 +73,20 @@ fn recently_completed(frame: &mut Frame, size: Rect, state: &mut State) {
 }
 
 fn project_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
-    let title = state.get_project()
+    let mut title = state.get_project()
         .map(|p| p.name.to_owned())
         .unwrap_or_else(|| "Project".to_string());
+    // Show search in title if we're searching tasks (show "/" even if query is empty)
+    if state.is_search_mode()
+        && matches!(state.get_search_target(), Some(crate::state::SearchTarget::Tasks)) {
+        title = format!("{} /{}", title, state.get_search_query());
+    } else if !state.get_search_query().is_empty()
+        && matches!(state.get_search_target(), Some(crate::state::SearchTarget::Tasks)) {
+        // Show query even if not in search mode (after exiting search)
+        title = format!("{} /{}", title, state.get_search_query());
+    }
     let block = view_block(&title, state);
-    let tasks = state.get_tasks().clone();
+    let tasks = state.get_filtered_tasks().to_vec();
     let list = task_list(&tasks).block(block);
     frame.render_stateful_widget(list, size, state.get_tasks_list_state());
 }
@@ -93,8 +102,7 @@ fn task_list(tasks: &[crate::asana::Task]) -> tui::widgets::List<'_> {
     let list = tui::widgets::List::new(items)
         .block(tui::widgets::Block::default().borders(tui::widgets::Borders::NONE))
         .style(styling::normal_text_style())
-        .highlight_style(styling::active_list_item_style())
-        .highlight_symbol(">>");
+        .highlight_style(styling::active_list_item_style());
     list
 }
 

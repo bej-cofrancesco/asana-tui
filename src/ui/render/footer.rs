@@ -1,19 +1,44 @@
 use super::Frame;
+use crate::state::State;
 use crate::ui::color::*;
 use tui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::Style,
+    style::{Color, Modifier, Style},
     text::{Span, Spans},
     widgets::Paragraph,
 };
 
 /// Render footer widget.
 ///
-pub fn footer(frame: &mut Frame, size: Rect) {
-    let controls_content = Spans::from(vec![Span::styled(
-        "j k h l: navigate, s: add/remove shortcut, /: search, enter: select, esc: cancel, q: quit",
-        Style::default().fg(YELLOW),
-    )]);
+pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
+    let controls_text = if state.is_search_mode() {
+        "Type to search, / or Esc: exit search"
+    } else {
+        "j k h l: navigate, s: add/remove shortcut, /: search, enter: select, esc: cancel, q: quit"
+    };
+    
+    let controls_content = if state.is_search_mode() {
+        // Show search mode indicator with different styling
+        Spans::from(vec![
+            Span::styled(
+                "SEARCH MODE: ",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                controls_text,
+                Style::default().fg(YELLOW),
+            ),
+        ])
+    } else {
+        Spans::from(vec![Span::styled(
+            controls_text,
+            Style::default().fg(YELLOW),
+        )])
+    };
+    
     let controls_widget = Paragraph::new(controls_content).alignment(Alignment::Left);
 
     let version_content = Spans::from(vec![Span::styled(

@@ -53,19 +53,29 @@ impl Handler {
                 KeyEvent {
                     code: KeyCode::Char('c'),
                     modifiers: KeyModifiers::CONTROL,
-                }
-                | KeyEvent {
-                    code: KeyCode::Char('q'),
-                    ..
                 } => {
                     debug!("Processing exit terminal event '{:?}'...", event);
                     return Ok(false);
                 }
                 KeyEvent {
+                    code: KeyCode::Char('q'),
+                    modifiers: KeyModifiers::NONE,
+                } => {
+                    if state.is_search_mode() {
+                        state.add_search_char('q');
+                    } else {
+                        debug!("Processing exit terminal event '{:?}'...", event);
+                        return Ok(false);
+                    }
+                }
+                KeyEvent {
                     code: KeyCode::Esc,
                     modifiers: KeyModifiers::NONE,
                 } => {
-                    if *state.current_focus() == Focus::View {
+                    if state.is_search_mode() {
+                        debug!("Processing exit search mode event '{:?}'...", event);
+                        state.exit_search_mode();
+                    } else if *state.current_focus() == Focus::View {
                         debug!("Processing view cancel terminal event '{:?}'...", event);
                         state.focus_menu();
                     }
@@ -73,126 +83,227 @@ impl Handler {
                 KeyEvent {
                     code: KeyCode::Char('h'),
                     modifiers: KeyModifiers::NONE,
-                } => match state.current_focus() {
-                    Focus::Menu => {
-                        debug!("Processing previous menu event '{:?}'...", event);
-                        state.previous_menu();
+                } => {
+                    if state.is_search_mode() {
+                        state.add_search_char('h');
+                    } else {
+                        match state.current_focus() {
+                            Focus::Menu => {
+                                debug!("Processing previous menu event '{:?}'...", event);
+                                state.previous_menu();
+                            }
+                            Focus::View => {}
+                        }
                     }
-                    Focus::View => {}
                 },
                 KeyEvent {
                     code: KeyCode::Char('l'),
                     modifiers: KeyModifiers::NONE,
-                } => match state.current_focus() {
-                    Focus::Menu => {
-                        debug!("Processing next menu event '{:?}'...", event);
-                        state.next_menu();
+                } => {
+                    if state.is_search_mode() {
+                        state.add_search_char('l');
+                    } else {
+                        match state.current_focus() {
+                            Focus::Menu => {
+                                debug!("Processing next menu event '{:?}'...", event);
+                                state.next_menu();
+                            }
+                            Focus::View => {}
+                        }
                     }
-                    Focus::View => {}
                 },
                 KeyEvent {
                     code: KeyCode::Char('k'),
                     modifiers: KeyModifiers::NONE,
-                } => match state.current_focus() {
-                    Focus::Menu => {
-                        debug!("Processing previous menu item event '{:?}'...", event);
-                        match state.current_menu() {
-                            Menu::Status => (),
-                            Menu::Shortcuts => {
-                                state.previous_shortcut_index();
+                } => {
+                    if state.is_search_mode() {
+                        state.add_search_char('k');
+                    } else {
+                        match state.current_focus() {
+                            Focus::Menu => {
+                                debug!("Processing previous menu item event '{:?}'...", event);
+                                match state.current_menu() {
+                                    Menu::Status => (),
+                                    Menu::Shortcuts => {
+                                        state.previous_shortcut_index();
+                                    }
+                                    Menu::TopList => {
+                                        state.previous_top_list_index();
+                                    }
+                                }
                             }
-                            Menu::TopList => {
-                                state.previous_top_list_index();
+                            Focus::View => {
+                                debug!("Processing previous task event '{:?}'...", event);
+                                state.previous_task_index();
                             }
                         }
-                    }
-                    Focus::View => {
-                        debug!("Processing previous task event '{:?}'...", event);
-                        state.previous_task_index();
                     }
                 },
                 KeyEvent {
                     code: KeyCode::Char('j'),
                     modifiers: KeyModifiers::NONE,
-                } => match state.current_focus() {
-                    Focus::Menu => {
-                        debug!("Processing next menu item event '{:?}'...", event);
-                        match state.current_menu() {
-                            Menu::Status => (),
-                            Menu::Shortcuts => {
-                                state.next_shortcut_index();
+                } => {
+                    if state.is_search_mode() {
+                        state.add_search_char('j');
+                    } else {
+                        match state.current_focus() {
+                            Focus::Menu => {
+                                debug!("Processing next menu item event '{:?}'...", event);
+                                match state.current_menu() {
+                                    Menu::Status => (),
+                                    Menu::Shortcuts => {
+                                        state.next_shortcut_index();
+                                    }
+                                    Menu::TopList => {
+                                        state.next_top_list_index();
+                                    }
+                                }
                             }
-                            Menu::TopList => {
-                                state.next_top_list_index();
+                            Focus::View => {
+                                debug!("Processing next task event '{:?}'...", event);
+                                state.next_task_index();
                             }
                         }
-                    }
-                    Focus::View => {
-                        debug!("Processing next task event '{:?}'...", event);
-                        state.next_task_index();
                     }
                 },
                 KeyEvent {
                     code: KeyCode::Enter,
                     modifiers: KeyModifiers::NONE,
-                } => match state.current_focus() {
-                    Focus::Menu => {
-                        debug!("Processing select menu item event '{:?}'...", event);
-                        match state.current_menu() {
-                            Menu::Status => {
-                                state.select_status_menu();
+                } => {
+                    if state.is_search_mode() {
+                        debug!("Processing exit search mode (Enter) event '{:?}'...", event);
+                        state.exit_search_mode();
+                    } else {
+                        match state.current_focus() {
+                            Focus::Menu => {
+                                debug!("Processing select menu item event '{:?}'...", event);
+                                match state.current_menu() {
+                                    Menu::Status => {
+                                        state.select_status_menu();
+                                    }
+                                    Menu::Shortcuts => {
+                                        state.select_current_shortcut_index();
+                                    }
+                                    Menu::TopList => {
+                                        state.select_current_top_list_index();
+                                    }
+                                }
                             }
-                            Menu::Shortcuts => {
-                                state.select_current_shortcut_index();
-                            }
-                            Menu::TopList => {
-                                state.select_current_top_list_index();
-                            }
+                            Focus::View => {}
                         }
                     }
-                    Focus::View => {}
                 },
                 KeyEvent {
                     code: KeyCode::Char(' '),
                     modifiers: KeyModifiers::NONE,
-                }
-                | KeyEvent {
+                } => {
+                    if !state.is_search_mode() {
+                        match state.current_focus() {
+                            Focus::View => {
+                                debug!("Processing toggle task completion event '{:?}'...", event);
+                                state.toggle_task_completion();
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        state.add_search_char(' ');
+                    }
+                },
+                KeyEvent {
                     code: KeyCode::Char('x'),
                     modifiers: KeyModifiers::NONE,
-                } => match state.current_focus() {
-                    Focus::View => {
-                        debug!("Processing toggle task completion event '{:?}'...", event);
-                        state.toggle_task_completion();
+                } => {
+                    if !state.is_search_mode() {
+                        match state.current_focus() {
+                            Focus::View => {
+                                debug!("Processing toggle task completion event '{:?}'...", event);
+                                state.toggle_task_completion();
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        state.add_search_char('x');
                     }
-                    _ => {}
                 },
                 KeyEvent {
                     code: KeyCode::Char('d'),
                     modifiers: KeyModifiers::NONE,
-                } => match state.current_focus() {
-                    Focus::View => {
-                        debug!("Processing delete task event '{:?}'...", event);
-                        state.delete_selected_task();
+                } => {
+                    if !state.is_search_mode() {
+                        match state.current_focus() {
+                            Focus::View => {
+                                debug!("Processing delete task event '{:?}'...", event);
+                                state.delete_selected_task();
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        // In search mode, add to search query
+                        state.add_search_char('d');
                     }
-                    _ => {}
                 },
                 KeyEvent {
                     code: KeyCode::Char('s'),
                     modifiers: KeyModifiers::NONE,
-                } => match state.current_focus() {
-                    Focus::Menu => {
-                        debug!("Processing star project event '{:?}'...", event);
-                        match state.current_menu() {
-                            Menu::TopList => {
-                                state.toggle_star_current_project();
+                } => {
+                    if state.is_search_mode() {
+                        debug!("Processing search character 's' event '{:?}'...", event);
+                        state.add_search_char('s');
+                    } else {
+                        match state.current_focus() {
+                            Focus::Menu => {
+                                debug!("Processing star/unstar event '{:?}'...", event);
+                                match state.current_menu() {
+                                    Menu::TopList => {
+                                        state.toggle_star_current_project();
+                                    }
+                                    Menu::Shortcuts => {
+                                        // Unstar from shortcuts list (only works for starred projects)
+                                        state.unstar_current_shortcut();
+                                    }
+                                    _ => {}
+                                }
                             }
                             _ => {}
                         }
                     }
-                    _ => {}
+                },
+                KeyEvent {
+                    code: KeyCode::Char('/'),
+                    modifiers: KeyModifiers::NONE,
+                } => {
+                    if state.is_search_mode() {
+                        debug!("Processing exit search mode (/) event '{:?}'...", event);
+                        state.exit_search_mode();
+                    } else {
+                        debug!("Processing enter search mode event '{:?}'...", event);
+                        state.enter_search_mode();
+                    }
+                },
+                KeyEvent {
+                    code: KeyCode::Backspace,
+                    modifiers: KeyModifiers::NONE,
+                } => {
+                    if state.is_search_mode() {
+                        debug!("Processing remove search character event '{:?}'...", event);
+                        state.remove_search_char();
+                    }
+                },
+                KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers: KeyModifiers::NONE,
+                } => {
+                    if state.is_search_mode() {
+                        debug!("Processing search character '{}' event '{:?}'...", c, event);
+                        state.add_search_char(c);
+                    } else {
+                        debug!("Skipping processing of terminal event '{:?}'...", event);
+                    }
                 },
                 _ => {
-                    debug!("Skipping processing of terminal event '{:?}'...", event);
+                    if !state.is_search_mode() {
+                        debug!("Skipping processing of terminal event '{:?}'...", event);
+                    }
                 }
             },
             Event::Tick => {

@@ -17,7 +17,7 @@ pub fn all(frame: &mut Frame, state: &mut State) {
 
     left(frame, columns[0], state);
     right(frame, columns[1], state);
-    footer(frame, rows[1]);
+    footer(frame, rows[1], state);
 }
 
 /// Render left widgets to terminal frame according to state.

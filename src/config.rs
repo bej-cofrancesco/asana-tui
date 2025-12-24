@@ -17,8 +17,11 @@ const AUTHORIZATION_INSTRUCTIONS: &[&str] = &[
 
 /// Oversees management of configuration file.
 ///
+#[derive(Clone)]
 pub struct Config {
     pub access_token: Option<String>,
+    pub starred_projects: Vec<String>, // GIDs
+    pub starred_project_names: std::collections::HashMap<String, String>, // GID -> Name
     file_path: Option<PathBuf>,
 }
 
@@ -27,6 +30,10 @@ pub struct Config {
 #[derive(Serialize, Deserialize)]
 struct FileSpec {
     pub access_token: String,
+    #[serde(default)]
+    pub starred_projects: Vec<String>, // GIDs
+    #[serde(default)]
+    pub starred_project_names: std::collections::HashMap<String, String>, // GID -> Name
 }
 
 impl Config {
@@ -36,6 +43,8 @@ impl Config {
         Config {
             file_path: None,
             access_token: None,
+            starred_projects: vec![],
+            starred_project_names: std::collections::HashMap::new(),
         }
     }
 
@@ -60,11 +69,13 @@ impl Config {
         self.file_path = Some(dir_path.join(Path::new(FILE_NAME)));
         let file_path = self.file_path.as_ref().unwrap();
 
-        // If file exists, try to extract token
+        // If file exists, try to extract token and starred projects
         if file_path.exists() {
             let contents = fs::read_to_string(&file_path)?;
             let data: FileSpec = serde_yaml::from_str(&contents)?;
             self.access_token = Some(data.access_token);
+            self.starred_projects = data.starred_projects;
+            self.starred_project_names = data.starred_project_names;
         }
         // Otherwise authorize with user and create file
         else {
@@ -81,6 +92,26 @@ impl Config {
     fn create_file(&self) -> Result<()> {
         let data = FileSpec {
             access_token: self.access_token.clone().unwrap(),
+            starred_projects: self.starred_projects.clone(),
+            starred_project_names: self.starred_project_names.clone(),
+        };
+        let content = serde_yaml::to_string(&data)?;
+        let file_path = self.file_path.as_ref().unwrap();
+        let mut file = fs::File::create(file_path)?;
+        write!(file, "{}", content)?;
+        Ok(())
+    }
+
+    /// Save the current configuration to disk.
+    ///
+    pub fn save(&self) -> Result<()> {
+        if self.file_path.is_none() {
+            return Err(anyhow!("No file path set"));
+        }
+        let data = FileSpec {
+            access_token: self.access_token.clone().ok_or(anyhow!("No access token"))?,
+            starred_projects: self.starred_projects.clone(),
+            starred_project_names: self.starred_project_names.clone(),
         };
         let content = serde_yaml::to_string(&data)?;
         let file_path = self.file_path.as_ref().unwrap();

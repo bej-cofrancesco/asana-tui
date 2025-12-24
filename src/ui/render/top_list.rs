@@ -4,7 +4,8 @@ use crate::state::{Focus, Menu, State};
 use crate::ui::widgets::styling;
 use tui::{
     layout::Rect,
-    text::Span,
+    style::Modifier,
+    text::{Span, Spans},
     widgets::{Block, Borders, List, ListItem},
 };
 
@@ -31,21 +32,39 @@ pub fn top_list(frame: &mut Frame, size: Rect, state: &mut State) {
         list_item_style = styling::current_list_item_style();
     }
 
-    if state.get_projects().is_empty() {
+    let filtered_projects = state.get_filtered_projects();
+    if filtered_projects.is_empty() && !state.is_search_mode() {
         frame.render_widget(spinner::widget(state, size.height).block(block), size);
         return;
     }
 
-    let items: Vec<ListItem> = state
-        .get_projects()
+    // Show search in title if we're searching projects (show "/" even if query is empty)
+    let title = if state.is_search_mode()
+        && matches!(state.get_search_target(), Some(crate::state::SearchTarget::Projects)) {
+        format!("{} /{}", BLOCK_TITLE, state.get_search_query())
+    } else if !state.get_search_query().is_empty()
+        && matches!(state.get_search_target(), Some(crate::state::SearchTarget::Projects)) {
+        // Show query even if not in search mode (after exiting search)
+        format!("{} /{}", BLOCK_TITLE, state.get_search_query())
+    } else {
+        BLOCK_TITLE.to_string()
+    };
+    block = block.title(title);
+
+    let items: Vec<ListItem> = filtered_projects
         .iter()
         .map(|p| {
-            let display_name = if state.is_project_starred(&p.gid) {
-                format!("⭐ {}", p.name)
+            // Make starred projects italic
+            if state.is_project_starred(&p.gid) {
+                ListItem::new(Spans::from(vec![
+                    Span::styled(
+                        p.name.to_owned(),
+                        styling::normal_text_style().add_modifier(Modifier::ITALIC),
+                    )
+                ]))
             } else {
-                p.name.to_owned()
-            };
-            ListItem::new(display_name)
+                ListItem::new(p.name.to_owned())
+            }
         })
         .collect();
     

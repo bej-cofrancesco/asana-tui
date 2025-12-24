@@ -21,12 +21,15 @@ use tui_logger::{init_logger, set_default_level};
 
 pub type NetworkEventSender = std::sync::mpsc::Sender<NetworkEvent>;
 type NetworkEventReceiver = std::sync::mpsc::Receiver<NetworkEvent>;
+pub type ConfigSaveSender = std::sync::mpsc::Sender<()>;
+type ConfigSaveReceiver = std::sync::mpsc::Receiver<()>;
 
 /// Oversees event processing, state management, and terminal output.
 ///
 pub struct App {
     access_token: String,
     state: Arc<Mutex<State>>,
+    config: Config,
 }
 
 impl App {
@@ -39,17 +42,49 @@ impl App {
 
         info!("Starting application...");
         let (tx, rx) = std::sync::mpsc::channel::<NetworkEvent>();
+        let (config_save_tx, config_save_rx) = std::sync::mpsc::channel::<()>();
+        let starred_projects = config.starred_projects.clone();
+        let starred_project_names = config.starred_project_names.clone();
+        let access_token = config.access_token.clone().ok_or(anyhow!("Failed to retrieve access token"))?;
         let mut app = App {
-            access_token: config
-                .access_token
-                .ok_or(anyhow!("Failed to retrieve access token"))?,
-            state: Arc::new(Mutex::new(State::new(tx.clone()))),
+            access_token,
+            state: Arc::new(Mutex::new(State::new(tx.clone(), config_save_tx.clone(), starred_projects, starred_project_names))),
+            config,
         };
         app.start_network(rx)?;
+        app.start_config_saver(config_save_rx);
         app.start_ui(tx).await?;
+
+        // Save config on exit
+        {
+            let state = app.state.lock().await;
+            app.config.starred_projects = state.get_starred_project_gids();
+            app.config.starred_project_names = state.get_starred_project_names();
+            if let Err(e) = app.config.save() {
+                error!("Failed to save config on exit: {}", e);
+            }
+        }
 
         info!("Exiting application...");
         Ok(())
+    }
+
+    /// Start a thread to handle config save requests.
+    ///
+    fn start_config_saver(&self, receiver: ConfigSaveReceiver) {
+        let state = Arc::clone(&self.state);
+        let mut config = self.config.clone();
+        std::thread::spawn(move || {
+            while receiver.recv().is_ok() {
+                if let Ok(state_guard) = state.try_lock() {
+                    config.starred_projects = state_guard.get_starred_project_gids();
+                    config.starred_project_names = state_guard.get_starred_project_names();
+                    if let Err(e) = config.save() {
+                        error!("Failed to save config: {}", e);
+                    }
+                }
+            }
+        });
     }
 
     /// Start a separate thread for asynchronous state mutations.
