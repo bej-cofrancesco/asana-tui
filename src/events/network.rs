@@ -94,9 +94,15 @@ impl<'a> Handler<'a> {
             "Fetching tasks for project '{}' (GID: {})...",
             &project.name, &project.gid
         );
+        // Determine if we should include completed tasks based on current filter
+        let include_completed = {
+            let state = self.state.lock().await;
+            matches!(state.get_task_filter(), crate::state::TaskFilter::All | crate::state::TaskFilter::Completed)
+        };
+        
         match self
             .asana
-            .tasks(&project.gid, workspace_gid.as_deref())
+            .tasks(&project.gid, workspace_gid.as_deref(), include_completed)
             .await
         {
             Ok(tasks) => {

@@ -15,6 +15,11 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
         " Type to search, / or Esc: exit search"
     } else if state.is_debug_mode() {
         " j/k: navigate logs, y: copy log, / or Esc: exit debug mode"
+    } else if state.has_delete_confirmation() {
+        " Enter: confirm delete, Esc: cancel"
+    } else if *state.current_focus() == crate::state::Focus::View 
+        && matches!(state.current_view(), crate::state::View::ProjectTasks) {
+        "j/k: navigate, space/x: toggle complete, d: delete, f: filter, /: search, esc: refresh & back, q: quit"
     } else {
         "j k h l: navigate, s: add/remove shortcut, /: search, d: debug mode, enter: select, esc: cancel, q: quit"
     };

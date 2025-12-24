@@ -79,8 +79,15 @@ impl Handler {
                     } else if state.is_debug_mode() {
                         debug!("Processing exit debug mode (Esc) event '{:?}'...", event);
                         state.exit_debug_mode();
+                    } else if state.has_delete_confirmation() {
+                        debug!("Processing cancel delete confirmation event '{:?}'...", event);
+                        state.cancel_delete_confirmation();
                     } else if *state.current_focus() == Focus::View {
-                        debug!("Processing view cancel terminal event '{:?}'...", event);
+                        debug!("Processing view cancel/refresh terminal event '{:?}'...", event);
+                        // Refetch tasks when escaping from task view
+                        if matches!(state.current_view(), crate::state::View::ProjectTasks) {
+                            state.dispatch(crate::events::network::Event::ProjectTasks);
+                        }
                         state.focus_menu();
                     }
                 }
@@ -92,11 +99,11 @@ impl Handler {
                         state.add_search_char('h');
                     } else {
                         match state.current_focus() {
-                            Focus::Menu => {
-                                debug!("Processing previous menu event '{:?}'...", event);
-                                state.previous_menu();
-                            }
-                            Focus::View => {}
+                    Focus::Menu => {
+                        debug!("Processing previous menu event '{:?}'...", event);
+                        state.previous_menu();
+                    }
+                    Focus::View => {}
                         }
                     }
                 }
@@ -111,11 +118,11 @@ impl Handler {
                         state.next_debug();
                     } else {
                         match state.current_focus() {
-                            Focus::Menu => {
-                                debug!("Processing next menu event '{:?}'...", event);
-                                state.next_menu();
-                            }
-                            Focus::View => {}
+                    Focus::Menu => {
+                        debug!("Processing next menu event '{:?}'...", event);
+                        state.next_menu();
+                    }
+                    Focus::View => {}
                         }
                     }
                 }
@@ -130,18 +137,18 @@ impl Handler {
                         state.previous_debug();
                     } else {
                         match state.current_focus() {
-                            Focus::Menu => {
-                                debug!("Processing previous menu item event '{:?}'...", event);
-                                match state.current_menu() {
-                                    Menu::Status => (),
-                                    Menu::Shortcuts => {
-                                        state.previous_shortcut_index();
-                                    }
-                                    Menu::TopList => {
-                                        state.previous_top_list_index();
-                                    }
-                                }
+                    Focus::Menu => {
+                        debug!("Processing previous menu item event '{:?}'...", event);
+                        match state.current_menu() {
+                            Menu::Status => (),
+                            Menu::Shortcuts => {
+                                state.previous_shortcut_index();
                             }
+                            Menu::TopList => {
+                                state.previous_top_list_index();
+                            }
+                        }
+                    }
                             Focus::View => {
                                 debug!("Processing previous task event '{:?}'...", event);
                                 state.previous_task_index();
@@ -160,18 +167,18 @@ impl Handler {
                         state.next_debug();
                     } else {
                         match state.current_focus() {
-                            Focus::Menu => {
-                                debug!("Processing next menu item event '{:?}'...", event);
-                                match state.current_menu() {
-                                    Menu::Status => (),
-                                    Menu::Shortcuts => {
-                                        state.next_shortcut_index();
-                                    }
-                                    Menu::TopList => {
-                                        state.next_top_list_index();
-                                    }
-                                }
+                    Focus::Menu => {
+                        debug!("Processing next menu item event '{:?}'...", event);
+                        match state.current_menu() {
+                            Menu::Status => (),
+                            Menu::Shortcuts => {
+                                state.next_shortcut_index();
                             }
+                            Menu::TopList => {
+                                state.next_top_list_index();
+                            }
+                        }
+                    }
                             Focus::View => {
                                 debug!("Processing next task event '{:?}'...", event);
                                 state.next_task_index();
@@ -189,6 +196,10 @@ impl Handler {
                     } else if state.is_debug_mode() {
                         debug!("Processing exit debug mode (Enter) event '{:?}'...", event);
                         state.exit_debug_mode();
+                    } else if state.has_delete_confirmation() {
+                        // Confirm delete - call delete_selected_task again to actually delete
+                        debug!("Processing confirm delete event '{:?}'...", event);
+                        state.delete_selected_task();
                     } else {
                         match state.current_focus() {
                             Focus::Menu => {
@@ -338,6 +349,22 @@ impl Handler {
                     }
                 }
                 KeyEvent {
+                    code: KeyCode::Char('f'),
+                    modifiers: KeyModifiers::NONE,
+                } => {
+                    if !state.is_search_mode() && !state.is_debug_mode() {
+                        match state.current_focus() {
+                            Focus::View => {
+                                debug!("Processing toggle task filter event '{:?}'...", event);
+                                state.next_task_filter();
+                            }
+                            _ => {}
+                        }
+                    } else if state.is_search_mode() {
+                        state.add_search_char('f');
+                    }
+                }
+                KeyEvent {
                     code: KeyCode::Backspace,
                     modifiers: KeyModifiers::NONE,
                 } => {
@@ -359,7 +386,7 @@ impl Handler {
                 }
                 _ => {
                     if !state.is_search_mode() {
-                        debug!("Skipping processing of terminal event '{:?}'...", event);
+                    debug!("Skipping processing of terminal event '{:?}'...", event);
                     }
                 }
             },

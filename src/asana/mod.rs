@@ -65,7 +65,10 @@ impl Asana {
     /// Returns a vector of projects for the workspace.
     ///
     pub async fn projects(&mut self, workspace_gid: &str) -> Result<Vec<Project>> {
-        debug!("Requesting projects for workspace GID {} (with pagination)...", workspace_gid);
+        debug!(
+            "Requesting projects for workspace GID {} (with pagination)...",
+            workspace_gid
+        );
 
         model!(ProjectModel "projects" { name: String });
 
@@ -75,7 +78,11 @@ impl Asana {
             .list_paginated::<ProjectModel>(Some(vec![("workspace", workspace_gid)]), Some(100))
             .await?;
 
-        debug!("Retrieved {} projects for workspace GID {}", data.len(), workspace_gid);
+        debug!(
+            "Retrieved {} projects for workspace GID {}",
+            data.len(),
+            workspace_gid
+        );
 
         Ok(data
             .into_iter()
@@ -89,21 +96,37 @@ impl Asana {
     /// Returns a vector of tasks for the project.
     /// By default, only fetches incomplete tasks for efficiency.
     ///
-    pub async fn tasks(&mut self, project_gid: &str, workspace_gid: Option<&str>) -> Result<Vec<Task>> {
-        debug!("Requesting incomplete tasks for project GID {} (with pagination)...", project_gid);
+    pub async fn tasks(
+        &mut self,
+        project_gid: &str,
+        _workspace_gid: Option<&str>,
+        include_completed: bool,
+    ) -> Result<Vec<Task>> {
+        debug!(
+            "Requesting tasks for project GID {} (with pagination, include_completed: {})...",
+            project_gid, include_completed
+        );
 
-        model!(TaskModel "tasks" { name: String });
+        model!(TaskModel "tasks" { name: String, completed: bool });
 
-        // Build query parameters - workspace is required for pagination per Asana API docs
-        // Only fetch incomplete tasks by default for efficiency
-        let mut params = vec![("project", project_gid)];
-        if let Some(workspace) = workspace_gid {
-            params.push(("workspace", workspace));
+        // Build query parameters
+        // According to Asana API: "Must specify exactly one of project, tag, section, user task list, or assignee + workspace"
+        // So we should NOT include workspace when we have project - they're mutually exclusive
+        // The workspace_gid parameter is kept for API compatibility but not used
+        let mut params: Vec<(&str, &str)> = vec![("project", project_gid)];
+
+        // Only filter to incomplete tasks if we don't want completed tasks
+        // This is more efficient for large projects when we only need incomplete tasks
+        // Store the string in a variable that lives long enough
+        let completed_since_str = if !include_completed {
+            Some(Utc::now().format("%Y-%m-%dT%H:%M:%S%.fZ").to_string())
+        } else {
+            None
+        };
+
+        if let Some(ref completed_since) = completed_since_str {
+            params.push(("completed_since", completed_since.as_str()));
         }
-        // Filter to only incomplete tasks - much more efficient for large projects
-        // Using a date far in the future ensures we only get incomplete tasks
-        let completed_since = Utc::now().format("%Y-%m-%dT%H:%M:%S%.fZ").to_string();
-        params.push(("completed_since", completed_since.as_str()));
 
         // Use pagination to handle large result sets
         let data: Vec<TaskModel> = self
@@ -111,13 +134,18 @@ impl Asana {
             .list_paginated::<TaskModel>(Some(params), Some(100))
             .await?;
 
-        debug!("Retrieved {} incomplete tasks for project GID {}", data.len(), project_gid);
+        debug!(
+            "Retrieved {} tasks for project GID {}",
+            data.len(),
+            project_gid
+        );
 
         Ok(data
             .into_iter()
             .map(|t| Task {
                 gid: t.gid,
                 name: t.name,
+                completed: t.completed,
             })
             .collect())
     }
@@ -130,19 +158,22 @@ impl Asana {
             user_gid, workspace_gid
         );
 
-        model!(TaskModel "tasks" { name: String });
+        model!(TaskModel "tasks" { name: String, completed: bool });
 
         // Use pagination to handle large result sets
         let data: Vec<TaskModel> = self
             .client
-            .list_paginated::<TaskModel>(Some(vec![
-                ("assignee", user_gid),
-                ("workspace", workspace_gid),
-                (
-                    "completed_since",
-                    &Utc::now().format("%Y-%m-%dT%H:%M:%S%.fZ").to_string(),
-                ),
-            ]), Some(100))
+            .list_paginated::<TaskModel>(
+                Some(vec![
+                    ("assignee", user_gid),
+                    ("workspace", workspace_gid),
+                    (
+                        "completed_since",
+                        &Utc::now().format("%Y-%m-%dT%H:%M:%S%.fZ").to_string(),
+                    ),
+                ]),
+                Some(100),
+            )
             .await?;
 
         debug!("Retrieved {} tasks for user GID {}", data.len(), user_gid);
@@ -152,6 +183,7 @@ impl Asana {
             .map(|t| Task {
                 gid: t.gid,
                 name: t.name,
+                completed: t.completed,
             })
             .collect())
     }
@@ -161,7 +193,7 @@ impl Asana {
     pub async fn update_task(&mut self, task_gid: &str, completed: Option<bool>) -> Result<Task> {
         debug!("Updating task GID {}...", task_gid);
 
-        model!(TaskModel "tasks" { name: String });
+        model!(TaskModel "tasks" { name: String, completed: bool });
 
         let body = if let Some(completed) = completed {
             serde_json::json!({
@@ -175,12 +207,7 @@ impl Asana {
 
         let model: Wrapper<TaskModel> = self
             .client
-            .call_with_body::<TaskModel>(
-                reqwest::Method::PUT,
-                Some(task_gid),
-                None,
-                Some(body),
-            )
+            .call_with_body::<TaskModel>(reqwest::Method::PUT, Some(task_gid), None, Some(body))
             .await?
             .json()
             .await?;
@@ -188,6 +215,7 @@ impl Asana {
         Ok(Task {
             gid: model.data.gid,
             name: model.data.name,
+            completed: model.data.completed,
         })
     }
 
@@ -196,15 +224,10 @@ impl Asana {
     pub async fn delete_task(&mut self, task_gid: &str) -> Result<()> {
         debug!("Deleting task GID {}...", task_gid);
 
-        model!(TaskModel "tasks" { name: String });
+        model!(TaskModel "tasks" { name: String, completed: bool });
 
         self.client
-            .call_with_body::<TaskModel>(
-                reqwest::Method::DELETE,
-                Some(task_gid),
-                None,
-                None,
-            )
+            .call_with_body::<TaskModel>(reqwest::Method::DELETE, Some(task_gid), None, None)
             .await?;
 
         Ok(())
@@ -341,7 +364,7 @@ mod tests {
         let mut asana = Asana {
             client: Client::new(&token.to_string(), &server.base_url()),
         };
-        asana.tasks(&project.gid, None).await?;
+        asana.tasks(&project.gid, None, false).await?;
         mock.assert_async().await;
         Ok(())
     }

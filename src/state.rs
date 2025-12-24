@@ -35,6 +35,15 @@ pub enum View {
     ProjectTasks,
 }
 
+/// Specifying task filter options.
+///
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum TaskFilter {
+    All,
+    Incomplete,
+    Completed,
+}
+
 /// Get the base shortcuts list.
 ///
 pub fn base_shortcuts() -> Vec<String> {
@@ -76,6 +85,8 @@ pub struct State {
     debug_mode: bool,
     debug_index: usize,
     debug_entries: Vec<String>, // Store log entries for navigation and copying
+    task_filter: TaskFilter,
+    delete_confirmation: Option<String>, // GID of task pending deletion confirmation
 }
 
 /// Specifies which panel is being searched.
@@ -119,6 +130,8 @@ impl Default for State {
             debug_mode: false,
             debug_index: 0,
             debug_entries: vec![],
+            task_filter: TaskFilter::Incomplete,
+            delete_confirmation: None,
         }
     }
 }
@@ -577,29 +590,92 @@ impl State {
         if let Some(selected_index) = self.tasks_list_state.selected() {
             if selected_index < filtered.len() {
                 let task = &filtered[selected_index];
-                // For now, we'll always toggle to completed=true
-                // In a full implementation, we'd check the current status
+                // Toggle the completion status
                 self.dispatch(NetworkEvent::UpdateTask {
                     gid: task.gid.to_owned(),
-                    completed: Some(true),
+                    completed: Some(!task.completed),
                 });
             }
         }
         self
     }
 
-    /// Delete the selected task.
+    /// Delete the selected task (shows confirmation if not already confirmed).
     ///
     pub fn delete_selected_task(&mut self) -> &mut Self {
         let filtered = self.get_filtered_tasks();
         if let Some(selected_index) = self.tasks_list_state.selected() {
             if selected_index < filtered.len() {
                 let task = &filtered[selected_index];
-                self.dispatch(NetworkEvent::DeleteTask {
-                    gid: task.gid.to_owned(),
-                });
+
+                // If we have a pending confirmation for this task, actually delete it
+                if let Some(pending_gid) = &self.delete_confirmation {
+                    if pending_gid == &task.gid {
+                        self.delete_confirmation = None;
+                        self.dispatch(NetworkEvent::DeleteTask {
+                            gid: task.gid.to_owned(),
+                        });
+                        return self;
+                    }
+                }
+
+                // Otherwise, show confirmation
+                self.delete_confirmation = Some(task.gid.to_owned());
             }
         }
+        self
+    }
+
+    /// Cancel delete confirmation.
+    ///
+    pub fn cancel_delete_confirmation(&mut self) -> &mut Self {
+        self.delete_confirmation = None;
+        self
+    }
+
+    /// Check if there's a pending delete confirmation.
+    ///
+    pub fn has_delete_confirmation(&self) -> bool {
+        self.delete_confirmation.is_some()
+    }
+
+    /// Get the current task filter.
+    ///
+    pub fn get_task_filter(&self) -> TaskFilter {
+        self.task_filter
+    }
+
+    /// Set the task filter.
+    ///
+    pub fn set_task_filter(&mut self, filter: TaskFilter) -> &mut Self {
+        self.task_filter = filter;
+        // Update filtered tasks when filter changes
+        self.update_search_filters();
+        self
+    }
+
+    /// Cycle to the next task filter.
+    ///
+    pub fn next_task_filter(&mut self) -> &mut Self {
+        let old_filter = self.task_filter;
+        self.task_filter = match self.task_filter {
+            TaskFilter::All => TaskFilter::Incomplete,
+            TaskFilter::Incomplete => TaskFilter::Completed,
+            TaskFilter::Completed => TaskFilter::All,
+        };
+
+        // If switching to All or Completed, we need to refetch tasks to get completed ones
+        // Only Incomplete filter can work with the current cached tasks
+        if matches!(self.task_filter, TaskFilter::All | TaskFilter::Completed)
+            && matches!(old_filter, TaskFilter::Incomplete)
+        {
+            // Refetch tasks when switching to a filter that needs completed tasks
+            if matches!(self.current_view(), View::ProjectTasks) {
+                self.dispatch(NetworkEvent::ProjectTasks);
+            }
+        }
+
+        self.update_search_filters();
         self
     }
 
@@ -1065,19 +1141,31 @@ impl State {
 
     /// Get filtered tasks (or all if not searching tasks).
     ///
-    pub fn get_filtered_tasks(&self) -> &[Task] {
-        // Show filtered results if we have a search query and target, even if not in search mode
-        if !self.search_query.is_empty() && matches!(self.search_target, Some(SearchTarget::Tasks))
+    pub fn get_filtered_tasks(&self) -> Vec<Task> {
+        // Start with search-filtered tasks if applicable
+        let base_tasks = if !self.search_query.is_empty()
+            && matches!(self.search_target, Some(SearchTarget::Tasks))
         {
             &self.filtered_tasks
         } else {
             &self.tasks
+        };
+
+        // Apply task filter (All, Incomplete, Completed)
+        match self.task_filter {
+            TaskFilter::All => base_tasks.to_vec(),
+            TaskFilter::Incomplete => base_tasks
+                .iter()
+                .filter(|t| !t.completed)
+                .cloned()
+                .collect(),
+            TaskFilter::Completed => base_tasks.iter().filter(|t| t.completed).cloned().collect(),
         }
     }
 
     /// Dispatches an asynchronous network event.
     ///
-    fn dispatch(&self, event: NetworkEvent) {
+    pub fn dispatch(&self, event: NetworkEvent) {
         if let Some(net_sender) = &self.net_sender {
             if let Err(err) = net_sender.send(event) {
                 error!("Recieved error from network dispatch: {}", err);

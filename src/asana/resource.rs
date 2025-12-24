@@ -23,6 +23,7 @@ pub struct Workspace {
 pub struct Task {
     pub gid: String,
     pub name: String,
+    pub completed: bool,
 }
 
 /// Defines project data structure.
