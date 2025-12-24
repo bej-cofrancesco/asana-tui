@@ -56,16 +56,16 @@ pub enum EditFormState {
     Assignee,
     DueDate,
     Section,
-    Tags,
 }
 
 /// Specifying task filter options.
 ///
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TaskFilter {
     All,
     Incomplete,
     Completed,
+    Assignee(Option<String>), // Filter by assignee GID (None = unassigned)
 }
 
 /// Get the base shortcuts list.
@@ -122,12 +122,18 @@ pub struct State {
     kanban_task_index: usize,            // Current task index in selected column
     comment_input_mode: bool,            // Whether in comment input mode
     comment_input_text: String,          // Current comment text being typed
+    comments_scroll_offset: usize,       // Scroll offset for comments list
+    current_task_panel: TaskDetailPanel, // Current panel in task detail view
     // Form input fields
     form_name: String,
     form_notes: String,
     form_assignee: Option<String>, // GID of selected assignee
-    form_due_on: String, // Date string
-    form_section: Option<String>, // GID of selected section
+    form_assignee_search: String,  // Search text for filtering assignees
+    form_due_on: String,           // Date string
+    form_section: Option<String>,  // GID of selected section
+    // Dropdown selection indices
+    assignee_dropdown_index: usize,
+    section_dropdown_index: usize,
 }
 
 /// Specifies which panel is being searched.
@@ -136,6 +142,15 @@ pub struct State {
 pub enum SearchTarget {
     Projects,
     Tasks,
+}
+
+/// Defines different panels within task detail view.
+///
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum TaskDetailPanel {
+    Details,  // Properties, assignee, dates, etc.
+    Comments, // Comments/stories
+    Notes,    // Task notes/description
 }
 
 /// Defines default application state.
@@ -184,11 +199,16 @@ impl Default for State {
             kanban_task_index: 0,
             comment_input_mode: false,
             comment_input_text: String::new(),
+            comments_scroll_offset: 0,
+            current_task_panel: TaskDetailPanel::Details,
             form_name: String::new(),
             form_notes: String::new(),
             form_assignee: None,
+            form_assignee_search: String::new(),
             form_due_on: String::new(),
             form_section: None,
+            assignee_dropdown_index: 0,
+            section_dropdown_index: 0,
         }
     }
 }
@@ -529,7 +549,7 @@ impl State {
             None
         }
     }
-    
+
     /// Get the length of the view stack.
     ///
     pub fn view_stack_len(&self) -> usize {
@@ -730,7 +750,7 @@ impl State {
     /// Get the current task filter.
     ///
     pub fn get_task_filter(&self) -> TaskFilter {
-        self.task_filter
+        self.task_filter.clone()
     }
 
     /// Set the task filter.
@@ -745,11 +765,12 @@ impl State {
     /// Cycle to the next task filter.
     ///
     pub fn next_task_filter(&mut self) -> &mut Self {
-        let old_filter = self.task_filter;
-        self.task_filter = match self.task_filter {
+        let old_filter = self.task_filter.clone();
+        self.task_filter = match &self.task_filter {
             TaskFilter::All => TaskFilter::Incomplete,
             TaskFilter::Incomplete => TaskFilter::Completed,
             TaskFilter::Completed => TaskFilter::All,
+            TaskFilter::Assignee(_) => TaskFilter::All, // Reset assignee filter to All
         };
 
         // If switching to All or Completed, we need to refetch tasks to get completed ones
@@ -762,6 +783,8 @@ impl State {
                 self.dispatch(NetworkEvent::ProjectTasks);
             }
         }
+
+        self.update_search_filters();
 
         self.update_search_filters();
         self
@@ -782,6 +805,7 @@ impl State {
 
     /// Clear the current task detail.
     ///
+    #[allow(dead_code)]
     pub fn clear_task_detail(&mut self) -> &mut Self {
         self.current_task_detail = None;
         self.task_stories = vec![];
@@ -818,6 +842,8 @@ impl State {
     ///
     pub fn set_task_stories(&mut self, stories: Vec<Story>) -> &mut Self {
         self.task_stories = stories;
+        // Auto-scroll to bottom to show newest comments
+        self.scroll_comments_to_bottom();
         self
     }
 
@@ -827,8 +853,71 @@ impl State {
         &self.task_stories
     }
 
+    pub fn get_comments_scroll_offset(&self) -> usize {
+        self.comments_scroll_offset
+    }
+
+    pub fn scroll_comments_up(&mut self) -> &mut Self {
+        if self.comments_scroll_offset > 0 {
+            self.comments_scroll_offset -= 1;
+        }
+        self
+    }
+
+    pub fn scroll_comments_down(&mut self) -> &mut Self {
+        let total_comments = self.task_stories.len();
+        if total_comments > 0 && self.comments_scroll_offset < total_comments.saturating_sub(1) {
+            self.comments_scroll_offset += 1;
+        }
+        self
+    }
+
+    pub fn scroll_comments_to_bottom(&mut self) -> &mut Self {
+        let total_comments = self.task_stories.len();
+        if total_comments > 0 {
+            // Set scroll to last comment
+            self.comments_scroll_offset = total_comments.saturating_sub(1);
+        }
+        self
+    }
+
+    pub fn reset_comments_scroll(&mut self) -> &mut Self {
+        self.comments_scroll_offset = 0;
+        self
+    }
+
+    // Task detail panel navigation
+
+    pub fn get_current_task_panel(&self) -> TaskDetailPanel {
+        self.current_task_panel
+    }
+
+    pub fn next_task_panel(&mut self) -> &mut Self {
+        self.current_task_panel = match self.current_task_panel {
+            TaskDetailPanel::Details => TaskDetailPanel::Comments,
+            TaskDetailPanel::Comments => TaskDetailPanel::Notes,
+            TaskDetailPanel::Notes => TaskDetailPanel::Details, // Wrap around
+        };
+        self
+    }
+
+    pub fn previous_task_panel(&mut self) -> &mut Self {
+        self.current_task_panel = match self.current_task_panel {
+            TaskDetailPanel::Details => TaskDetailPanel::Notes, // Wrap around
+            TaskDetailPanel::Comments => TaskDetailPanel::Details,
+            TaskDetailPanel::Notes => TaskDetailPanel::Comments,
+        };
+        self
+    }
+
+    pub fn reset_task_panel(&mut self) -> &mut Self {
+        self.current_task_panel = TaskDetailPanel::Details;
+        self
+    }
+
     /// Toggle view mode (List/Kanban).
     ///
+    #[allow(dead_code)]
     pub fn toggle_view_mode(&mut self) -> &mut Self {
         self.view_mode = match self.view_mode {
             ViewMode::List => ViewMode::Kanban,
@@ -845,6 +934,7 @@ impl State {
 
     /// Set kanban column index.
     ///
+    #[allow(dead_code)]
     pub fn set_kanban_column_index(&mut self, index: usize) -> &mut Self {
         self.kanban_column_index = index.min(self.sections.len().saturating_sub(1));
         self
@@ -879,26 +969,29 @@ impl State {
         }
         self
     }
-    
+
     /// Set kanban task index.
     ///
+    #[allow(dead_code)]
     pub fn set_kanban_task_index(&mut self, index: usize) -> &mut Self {
         self.kanban_task_index = index;
         self
     }
-    
+
     /// Get kanban task index.
     ///
     pub fn get_kanban_task_index(&self) -> usize {
         self.kanban_task_index
     }
-    
+
     /// Navigate to next task in current kanban column.
     ///
+    #[allow(dead_code)]
     pub fn next_kanban_task(&mut self) -> &mut Self {
         if !self.sections.is_empty() && self.kanban_column_index < self.sections.len() {
             let section = &self.sections[self.kanban_column_index];
-            let section_tasks: Vec<&Task> = self.tasks
+            let section_tasks: Vec<&Task> = self
+                .tasks
                 .iter()
                 .filter(|t| {
                     t.section
@@ -907,20 +1000,22 @@ impl State {
                         .unwrap_or(false)
                 })
                 .collect();
-            
+
             if !section_tasks.is_empty() {
                 self.kanban_task_index = (self.kanban_task_index + 1) % section_tasks.len();
             }
         }
         self
     }
-    
+
     /// Navigate to previous task in current kanban column.
     ///
+    #[allow(dead_code)]
     pub fn previous_kanban_task(&mut self) -> &mut Self {
         if !self.sections.is_empty() && self.kanban_column_index < self.sections.len() {
             let section = &self.sections[self.kanban_column_index];
-            let section_tasks: Vec<&Task> = self.tasks
+            let section_tasks: Vec<&Task> = self
+                .tasks
                 .iter()
                 .filter(|t| {
                     t.section
@@ -929,7 +1024,7 @@ impl State {
                         .unwrap_or(false)
                 })
                 .collect();
-            
+
             if !section_tasks.is_empty() {
                 if self.kanban_task_index > 0 {
                     self.kanban_task_index -= 1;
@@ -940,16 +1035,17 @@ impl State {
         }
         self
     }
-    
+
     /// Get current selected task in kanban view.
     ///
     pub fn get_kanban_selected_task(&self) -> Option<&Task> {
         if self.sections.is_empty() || self.kanban_column_index >= self.sections.len() {
             return None;
         }
-        
+
         let section = &self.sections[self.kanban_column_index];
-        let section_tasks: Vec<&Task> = self.tasks
+        let section_tasks: Vec<&Task> = self
+            .tasks
             .iter()
             .filter(|t| {
                 t.section
@@ -958,7 +1054,7 @@ impl State {
                     .unwrap_or(false)
             })
             .collect();
-        
+
         if self.kanban_task_index < section_tasks.len() {
             Some(section_tasks[self.kanban_task_index])
         } else {
@@ -1029,128 +1125,246 @@ impl State {
         self.comment_input_mode = false;
         text
     }
-    
+
     /// Get form name.
     ///
     pub fn get_form_name(&self) -> &str {
         &self.form_name
     }
-    
+
     /// Set form name.
     ///
     pub fn set_form_name(&mut self, name: String) -> &mut Self {
         self.form_name = name;
         self
     }
-    
+
     /// Add character to form name.
     ///
     pub fn add_form_name_char(&mut self, c: char) -> &mut Self {
         self.form_name.push(c);
         self
     }
-    
+
     /// Remove last character from form name.
     ///
     pub fn remove_form_name_char(&mut self) -> &mut Self {
         self.form_name.pop();
         self
     }
-    
+
     /// Get form notes.
     ///
     pub fn get_form_notes(&self) -> &str {
         &self.form_notes
     }
-    
+
     /// Set form notes.
     ///
     pub fn set_form_notes(&mut self, notes: String) -> &mut Self {
         self.form_notes = notes;
         self
     }
-    
+
     /// Add character to form notes.
     ///
     pub fn add_form_notes_char(&mut self, c: char) -> &mut Self {
         self.form_notes.push(c);
         self
     }
-    
+
     /// Remove last character from form notes.
     ///
     pub fn remove_form_notes_char(&mut self) -> &mut Self {
         self.form_notes.pop();
         self
     }
-    
+
     /// Get form assignee.
     ///
     pub fn get_form_assignee(&self) -> Option<&String> {
         self.form_assignee.as_ref()
     }
-    
+
     /// Set form assignee.
     ///
     pub fn set_form_assignee(&mut self, assignee: Option<String>) -> &mut Self {
         self.form_assignee = assignee;
         self
     }
-    
+
     /// Get form due date.
     ///
     pub fn get_form_due_on(&self) -> &str {
         &self.form_due_on
     }
-    
+
     /// Set form due date.
     ///
     pub fn set_form_due_on(&mut self, due_on: String) -> &mut Self {
         self.form_due_on = due_on;
         self
     }
-    
+
     /// Add character to form due date.
     ///
     pub fn add_form_due_on_char(&mut self, c: char) -> &mut Self {
         self.form_due_on.push(c);
         self
     }
-    
+
     /// Remove last character from form due date.
     ///
     pub fn remove_form_due_on_char(&mut self) -> &mut Self {
         self.form_due_on.pop();
         self
     }
-    
+
     /// Get form section.
     ///
     pub fn get_form_section(&self) -> Option<&String> {
         self.form_section.as_ref()
     }
-    
+
     /// Set form section.
     ///
     pub fn set_form_section(&mut self, section: Option<String>) -> &mut Self {
         self.form_section = section;
         self
     }
-    
+
+    pub fn get_assignee_dropdown_index(&self) -> usize {
+        self.assignee_dropdown_index
+    }
+
+    pub fn set_assignee_dropdown_index(&mut self, index: usize) -> &mut Self {
+        self.assignee_dropdown_index = index;
+        self
+    }
+
+    pub fn next_assignee(&mut self) -> &mut Self {
+        let users = self.get_filtered_assignees();
+        if !users.is_empty() {
+            self.assignee_dropdown_index = (self.assignee_dropdown_index + 1) % users.len();
+        }
+        self
+    }
+
+    pub fn previous_assignee(&mut self) -> &mut Self {
+        let users = self.get_filtered_assignees();
+        if !users.is_empty() {
+            if self.assignee_dropdown_index == 0 {
+                self.assignee_dropdown_index = users.len() - 1;
+            } else {
+                self.assignee_dropdown_index -= 1;
+            }
+        }
+        self
+    }
+
+    pub fn select_current_assignee(&mut self) -> &mut Self {
+        let users = self.get_filtered_assignees();
+        if !users.is_empty() && self.assignee_dropdown_index < users.len() {
+            self.form_assignee = Some(users[self.assignee_dropdown_index].gid.clone());
+        }
+        self
+    }
+
+    /// Get filtered assignees based on search text
+    pub fn get_filtered_assignees(&self) -> Vec<User> {
+        let search = self.form_assignee_search.to_lowercase();
+        if search.is_empty() {
+            self.workspace_users.clone()
+        } else {
+            self.workspace_users
+                .iter()
+                .filter(|u| {
+                    u.name.to_lowercase().contains(&search)
+                        || u.email.to_lowercase().contains(&search)
+                })
+                .cloned()
+                .collect()
+        }
+    }
+
+    pub fn add_assignee_search_char(&mut self, c: char) -> &mut Self {
+        self.form_assignee_search.push(c);
+        // Reset dropdown index when search changes
+        self.assignee_dropdown_index = 0;
+        self
+    }
+
+    pub fn backspace_assignee_search(&mut self) -> &mut Self {
+        self.form_assignee_search.pop();
+        // Reset dropdown index when search changes
+        self.assignee_dropdown_index = 0;
+        self
+    }
+
+    pub fn get_assignee_search(&self) -> &str {
+        &self.form_assignee_search
+    }
+
+    pub fn clear_assignee_search(&mut self) -> &mut Self {
+        self.form_assignee_search.clear();
+        self.assignee_dropdown_index = 0;
+        self
+    }
+
+    pub fn get_section_dropdown_index(&self) -> usize {
+        self.section_dropdown_index
+    }
+
+    pub fn set_section_dropdown_index(&mut self, index: usize) -> &mut Self {
+        self.section_dropdown_index = index;
+        self
+    }
+
+    pub fn next_section(&mut self) -> &mut Self {
+        let max = self.sections.len();
+        if max > 0 {
+            self.section_dropdown_index = (self.section_dropdown_index + 1) % max;
+        }
+        self
+    }
+
+    pub fn previous_section(&mut self) -> &mut Self {
+        let max = self.sections.len();
+        if max > 0 {
+            self.section_dropdown_index = if self.section_dropdown_index == 0 {
+                max - 1
+            } else {
+                self.section_dropdown_index - 1
+            };
+        }
+        self
+    }
+
+    pub fn select_current_section(&mut self) -> &mut Self {
+        if let Some(section) = self.sections.get(self.section_dropdown_index) {
+            self.form_section = Some(section.gid.clone());
+        }
+        self
+    }
+
     /// Clear form fields.
     ///
     pub fn clear_form(&mut self) -> &mut Self {
         self.form_name.clear();
         self.form_notes.clear();
         self.form_assignee = None;
+        self.form_assignee_search.clear();
         self.form_due_on.clear();
         self.form_section = None;
         self.edit_form_state = None;
+        self.assignee_dropdown_index = 0;
+        self.section_dropdown_index = 0;
         self
     }
-    
+
     /// Initialize edit form with task data.
     ///
+    #[allow(dead_code)]
     pub fn init_edit_form(&mut self, task: &Task) -> &mut Self {
         self.form_name = task.name.clone();
         self.form_notes = task.notes.clone().unwrap_or_default();
@@ -1633,8 +1847,8 @@ impl State {
             &self.tasks
         };
 
-        // Apply task filter (All, Incomplete, Completed)
-        match self.task_filter {
+        // Apply task filter (All, Incomplete, Completed, Assignee)
+        match &self.task_filter {
             TaskFilter::All => base_tasks.to_vec(),
             TaskFilter::Incomplete => base_tasks
                 .iter()
@@ -1642,6 +1856,17 @@ impl State {
                 .cloned()
                 .collect(),
             TaskFilter::Completed => base_tasks.iter().filter(|t| t.completed).cloned().collect(),
+            TaskFilter::Assignee(assignee_gid) => base_tasks
+                .iter()
+                .filter(|t| {
+                    match (assignee_gid, &t.assignee) {
+                        (None, None) => true, // Unassigned tasks
+                        (Some(gid), Some(assignee)) => &assignee.gid == gid,
+                        _ => false,
+                    }
+                })
+                .cloned()
+                .collect(),
         }
     }
 

@@ -17,8 +17,7 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &State) {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3), // Header
-                Constraint::Min(1),    // Main content
-                Constraint::Length(1), // Footer
+                Constraint::Min(10),   // Main content (increased min height)
             ])
             .split(size);
 
@@ -39,17 +38,26 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &State) {
             .alignment(Alignment::Left);
         frame.render_widget(name_para, chunks[0]);
 
-        // Main content area
+        // Main content area - split into top (properties + comments) and bottom (notes)
         let main_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(60), // Properties and comments
+                Constraint::Percentage(40), // Notes
+            ])
+            .split(chunks[1]);
+        
+        // Top section: properties and comments side by side
+        let top_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(chunks[1]);
+            .split(main_chunks[0]);
 
         // Left column: Task properties
-        render_task_properties(frame, main_chunks[0], task, state);
+        render_task_properties(frame, top_chunks[0], task, state);
 
         // Right column: Comments
-        render_comments(frame, main_chunks[1], state, task);
+        render_comments(frame, top_chunks[1], state, task);
 
         // Notes area at bottom
         let notes_chunks = Layout::default()
@@ -146,7 +154,21 @@ fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Ta
 
 fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::asana::Task) {
     let stories = state.get_task_stories();
-
+    
+    // Filter for actual comments (resource_subtype = "comment_added")
+    // Ignore system activity messages
+    let comments: Vec<&crate::asana::Story> = stories
+        .iter()
+        .filter(|s| {
+            // Include if it's a comment_added, or if subtype is missing but created_by exists
+            // (for backwards compatibility)
+            match &s.resource_subtype {
+                Some(subtype) => subtype == "comment_added",
+                None => s.created_by.is_some(), // Fallback: if no subtype, assume comment if has author
+            }
+        })
+        .collect();
+    
     // Split into comments area and input area if in comment input mode
     let chunks = if state.is_comment_input_mode() {
         Layout::default()
@@ -160,17 +182,28 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
             .split(size)
     };
 
-    let block = Block::default().borders(Borders::ALL).title("Comments");
+    let scroll_offset = state.get_comments_scroll_offset();
+    let title = if comments.len() > 1 {
+        format!("Comments ({}) - j/k to scroll", comments.len())
+    } else {
+        format!("Comments ({})", comments.len())
+    };
 
-    if stories.is_empty() && !state.is_comment_input_mode() {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(styling::normal_block_border_style());
+
+    if comments.is_empty() && !state.is_comment_input_mode() {
         let text = Paragraph::new("No comments yet. Press 'c' to add a comment.")
             .block(block)
             .alignment(Alignment::Center);
         frame.render_widget(text, chunks[0]);
     } else {
-        let items: Vec<ListItem> = stories
+        let items: Vec<ListItem> = comments
             .iter()
-            .map(|story| {
+            .enumerate()
+            .map(|(i, story)| {
                 let author = story
                     .created_by
                     .as_ref()
@@ -189,20 +222,55 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
                     Span::styled(timestamp_str, Style::default().fg(Color::DarkGray)),
                 ]);
 
-                ListItem::new(vec![
-                    header,
-                    Spans::from(vec![Span::styled(
-                        story.text.clone(),
-                        styling::normal_text_style(),
-                    )]),
-                ])
+                // Wrap long comment text
+                let text_lines: Vec<Spans> = story.text
+                    .lines()
+                    .flat_map(|line| {
+                        // Simple word wrapping
+                        let max_width = (size.width.saturating_sub(4)) as usize;
+                        if line.len() <= max_width {
+                            vec![Spans::from(Span::styled(line.to_string(), styling::normal_text_style()))]
+                        } else {
+                            let mut result = vec![];
+                            let mut current_line = String::new();
+                            for word in line.split_whitespace() {
+                                if current_line.len() + word.len() + 1 > max_width {
+                                    if !current_line.is_empty() {
+                                        result.push(Spans::from(Span::styled(current_line.clone(), styling::normal_text_style())));
+                                        current_line.clear();
+                                    }
+                                }
+                                if !current_line.is_empty() {
+                                    current_line.push(' ');
+                                }
+                                current_line.push_str(word);
+                            }
+                            if !current_line.is_empty() {
+                                result.push(Spans::from(Span::styled(current_line, styling::normal_text_style())));
+                            }
+                            result
+                        }
+                    })
+                    .collect();
+
+                let mut all_lines = vec![header, Spans::from("")]; // Add blank line after header
+                all_lines.extend(text_lines);
+                all_lines.push(Spans::from("")); // Add blank line after comment
+
+                ListItem::new(all_lines)
             })
             .collect();
 
+        // Calculate visible range based on scroll offset
         let list = List::new(items)
             .block(block)
             .style(styling::normal_text_style());
-        frame.render_widget(list, chunks[0]);
+        
+        // Create a list state for scrolling
+        let mut list_state = tui::widgets::ListState::default();
+        list_state.select(Some(scroll_offset.min(comments.len().saturating_sub(1))));
+        
+        frame.render_stateful_widget(list, chunks[0], &mut list_state);
     }
 
     // Show comment input if in comment input mode

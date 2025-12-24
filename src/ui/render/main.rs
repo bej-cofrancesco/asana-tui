@@ -99,18 +99,30 @@ fn recently_completed(frame: &mut Frame, size: Rect, state: &mut State) {
 }
 
 fn project_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
-    let mut title = state
+    let project_name = state
         .get_project()
         .map(|p| p.name.to_owned())
         .unwrap_or_else(|| "Project".to_string());
 
     // Add filter indicator
     let filter_text = match state.get_task_filter() {
-        crate::state::TaskFilter::All => " [All]",
-        crate::state::TaskFilter::Incomplete => " [Incomplete]",
-        crate::state::TaskFilter::Completed => " [Completed]",
+        crate::state::TaskFilter::All => " [All]".to_string(),
+        crate::state::TaskFilter::Incomplete => " [Incomplete]".to_string(),
+        crate::state::TaskFilter::Completed => " [Completed]".to_string(),
+        crate::state::TaskFilter::Assignee(None) => " [Unassigned]".to_string(),
+        crate::state::TaskFilter::Assignee(Some(gid)) => {
+            // Find assignee name from workspace users
+            let assignee_name = state
+                .get_workspace_users()
+                .iter()
+                .find(|u| u.gid == gid)
+                .map(|u| u.name.as_str())
+                .unwrap_or("Unknown");
+            format!(" [Assignee: {}]", assignee_name)
+        }
     };
-    title.push_str(filter_text);
+    
+    let mut title = format!("{}{}", project_name, filter_text);
 
     // Show search in title if we're searching tasks (show "/" even if query is empty)
     if state.is_search_mode()
@@ -171,24 +183,19 @@ fn project_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
 fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
     use crate::ui::widgets::styling;
     use tui::{
+        layout::Alignment,
         style::{Color, Modifier, Style},
-        widgets::{Block, Borders, Paragraph, Wrap},
+        text::{Span, Spans},
+        widgets::{Block, Borders, Clear, Paragraph, Wrap},
     };
 
-    // Render a semi-transparent overlay to dim the background
-    let overlay = Block::default().style(
-        Style::default()
-            .bg(Color::Black)
-            .add_modifier(Modifier::DIM),
-    );
-    frame.render_widget(overlay, size);
-
-    // Create a centered popup dialog - make it more compact
-    let dialog_width = 50.min(size.width.saturating_sub(4));
-    let dialog_height = 6.min(size.height.saturating_sub(4));
+    // Create a centered popup dialog
+    let dialog_width = 60.min(size.width.saturating_sub(4));
+    let dialog_height = 7;
+    
     // Center horizontally and vertically
-    let x = size.width.saturating_sub(dialog_width) / 2;
-    let y = size.height.saturating_sub(dialog_height) / 2;
+    let x = (size.width.saturating_sub(dialog_width)) / 2;
+    let y = (size.height.saturating_sub(dialog_height)) / 2;
 
     let dialog_rect = Rect {
         x,
@@ -197,22 +204,40 @@ fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
         height: dialog_height,
     };
 
-    // Format the text with better spacing - truncate long task names
-    let display_name = if task_name.len() > 40 {
-        format!("{}...", &task_name[..37])
+    // Clear the area first - this removes the grey background!
+    frame.render_widget(Clear, dialog_rect);
+
+    // Format the text - truncate long task names
+    let display_name = if task_name.len() > 45 {
+        format!("{}...", &task_name[..45])
     } else {
         task_name.to_string()
     };
-    let text = format!(
-        "Delete task?\n\n{}\n\nEnter: confirm  Esc: cancel",
-        display_name
-    );
 
-    // Create a more prominent popup block with warning styling
+    let text = vec![
+        Spans::from(""),
+        Spans::from(Span::styled(
+            format!("Delete task: \"{}\"?", display_name),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Spans::from(""),
+        Spans::from(vec![
+            Span::styled("Press ", Style::default().fg(Color::Gray)),
+            Span::styled("Enter", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(" to confirm, ", Style::default().fg(Color::Gray)),
+            Span::styled("Esc", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(" to cancel", Style::default().fg(Color::Gray)),
+        ]),
+    ];
+
+    // Create a prominent popup with warning styling and solid black background
     let title = Spans::from(vec![Span::styled(
         " ⚠  Confirm Delete ",
         Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
     )]);
+    
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
@@ -222,8 +247,7 @@ fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
     let paragraph = Paragraph::new(text)
         .block(block)
         .wrap(Wrap { trim: true })
-        .style(styling::normal_text_style())
-        .alignment(tui::layout::Alignment::Center);
+        .alignment(Alignment::Center);
 
     frame.render_widget(paragraph, dialog_rect);
 }

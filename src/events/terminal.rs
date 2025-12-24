@@ -58,6 +58,34 @@ impl Handler {
                     debug!("Processing exit terminal event '{:?}'...", event);
                     return Ok(false);
                 }
+                // Handle comment input mode FIRST - all character keys go to comment
+                KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers: KeyModifiers::NONE,
+                } if state.is_comment_input_mode() => {
+                    state.add_comment_char(c);
+                }
+                KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers: KeyModifiers::SHIFT,
+                } if state.is_comment_input_mode() => {
+                    state.add_comment_char(c);
+                }
+                // Handle assignee search input - all character keys go to search
+                KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers: KeyModifiers::NONE,
+                } if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) 
+                    && matches!(state.get_edit_form_state(), Some(crate::state::EditFormState::Assignee)) => {
+                    state.add_assignee_search_char(c);
+                }
+                KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers: KeyModifiers::SHIFT,
+                } if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) 
+                    && matches!(state.get_edit_form_state(), Some(crate::state::EditFormState::Assignee)) => {
+                    state.add_assignee_search_char(c);
+                }
                 KeyEvent {
                     code: KeyCode::Char('q'),
                     modifiers: KeyModifiers::NONE,
@@ -172,6 +200,32 @@ impl Handler {
                     } else if state.is_debug_mode() {
                         debug!("Processing previous debug event '{:?}'...", event);
                         state.previous_debug();
+                    } else if state.is_comment_input_mode() {
+                        // In comment input mode, 'k' should be typed, not scroll
+                        state.add_comment_char('k');
+                    } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                        // Scroll comments up in task detail view
+                        debug!("Processing scroll comments up event '{:?}'...", event);
+                        state.scroll_comments_up();
+                    } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
+                        // Handle dropdown navigation in forms
+                        match state.get_edit_form_state() {
+                            Some(crate::state::EditFormState::Assignee) => {
+                                debug!("Processing previous assignee event '{:?}'...", event);
+                                state.previous_assignee();
+                            }
+                            Some(crate::state::EditFormState::Section) => {
+                                debug!("Processing previous section event '{:?}'...", event);
+                                state.previous_section();
+                            }
+                            _ => {}
+                        }
+                    } else if matches!(state.current_view(), crate::state::View::KanbanBoard) 
+                        || (matches!(state.current_view(), crate::state::View::ProjectTasks) 
+                            && state.get_view_mode() == crate::state::ViewMode::Kanban) {
+                        // Navigate to previous kanban task
+                        debug!("Processing previous kanban task event '{:?}'...", event);
+                        state.previous_kanban_task();
                     } else {
                         match state.current_focus() {
                     Focus::Menu => {
@@ -202,6 +256,32 @@ impl Handler {
                     } else if state.is_debug_mode() {
                         debug!("Processing next debug event '{:?}'...", event);
                         state.next_debug();
+                    } else if state.is_comment_input_mode() {
+                        // In comment input mode, 'j' should be typed, not scroll
+                        state.add_comment_char('j');
+                    } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                        // Scroll comments down in task detail view
+                        debug!("Processing scroll comments down event '{:?}'...", event);
+                        state.scroll_comments_down();
+                    } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
+                        // Handle dropdown navigation in forms
+                        match state.get_edit_form_state() {
+                            Some(crate::state::EditFormState::Assignee) => {
+                                debug!("Processing next assignee event '{:?}'...", event);
+                                state.next_assignee();
+                            }
+                            Some(crate::state::EditFormState::Section) => {
+                                debug!("Processing next section event '{:?}'...", event);
+                                state.next_section();
+                            }
+                            _ => {}
+                        }
+                    } else if matches!(state.current_view(), crate::state::View::KanbanBoard) 
+                        || (matches!(state.current_view(), crate::state::View::ProjectTasks) 
+                            && state.get_view_mode() == crate::state::ViewMode::Kanban) {
+                        // Navigate to next kanban task
+                        debug!("Processing next kanban task event '{:?}'...", event);
+                        state.next_kanban_task();
                     } else {
                         match state.current_focus() {
                     Focus::Menu => {
@@ -259,14 +339,14 @@ impl Handler {
                                 state.set_edit_form_state(Some(crate::state::EditFormState::Assignee));
                             }
                             Some(crate::state::EditFormState::Assignee) => {
-                                // Toggle through assignees or show selection
-                                // For now, just move to next field
+                                // Select the current assignee and move to next field
+                                state.select_current_assignee();
                                 state.set_edit_form_state(Some(crate::state::EditFormState::DueDate));
                             }
                             Some(crate::state::EditFormState::DueDate) => {
                                 state.set_edit_form_state(Some(crate::state::EditFormState::Section));
                             }
-                            Some(crate::state::EditFormState::Section) | Some(crate::state::EditFormState::Tags) => {
+                            Some(crate::state::EditFormState::Section) => {
                                 // Submit form
                                 if matches!(state.current_view(), crate::state::View::CreateTask) {
                                     // Create task
@@ -412,6 +492,8 @@ impl Handler {
                     if state.is_search_mode() {
                         // In search mode, add to search query
                         state.add_search_char('d');
+                    } else if state.is_comment_input_mode() {
+                        state.add_comment_char('d');
                     } else if state.is_debug_mode() {
                         debug!("Processing exit debug mode (d) event '{:?}'...", event);
                         state.exit_debug_mode();
@@ -443,6 +525,8 @@ impl Handler {
                 } => {
                     if state.is_search_mode() {
                         state.add_search_char('e');
+                    } else if state.is_comment_input_mode() {
+                        state.add_comment_char('e');
                     } else if matches!(state.current_focus(), Focus::View) {
                         if matches!(state.current_view(), crate::state::View::TaskDetail) {
                             // Edit task from detail view
@@ -489,6 +573,8 @@ impl Handler {
                 } => {
                     if state.is_search_mode() {
                         state.add_search_char('c');
+                    } else if state.is_comment_input_mode() {
+                        state.add_comment_char('c');
                     } else if matches!(state.current_focus(), Focus::View) {
                         if matches!(state.current_view(), crate::state::View::TaskDetail) {
                             // Add comment from detail view
@@ -637,6 +723,9 @@ impl Handler {
                             Some(crate::state::EditFormState::Notes) => {
                                 state.remove_form_notes_char();
                             }
+                            Some(crate::state::EditFormState::Assignee) => {
+                                state.backspace_assignee_search();
+                            }
                             Some(crate::state::EditFormState::DueDate) => {
                                 state.remove_form_due_on_char();
                             }
@@ -646,10 +735,27 @@ impl Handler {
                 }
                 KeyEvent {
                     code: KeyCode::Tab,
+                    modifiers: KeyModifiers::NONE,
+                } => {
+                    if !state.is_search_mode() && !state.is_comment_input_mode() {
+                        if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
+                            let next_state = match state.get_edit_form_state() {
+                                Some(crate::state::EditFormState::Name) => crate::state::EditFormState::Notes,
+                                Some(crate::state::EditFormState::Notes) => crate::state::EditFormState::Assignee,
+                                Some(crate::state::EditFormState::Assignee) => crate::state::EditFormState::DueDate,
+                                Some(crate::state::EditFormState::DueDate) => crate::state::EditFormState::Section,
+                                Some(crate::state::EditFormState::Section) => crate::state::EditFormState::Name,
+                                None => crate::state::EditFormState::Name,
+                            };
+                            state.set_edit_form_state(Some(next_state));
+                        }
+                    }
+                }
+                KeyEvent {
+                    code: KeyCode::BackTab,
                     modifiers: KeyModifiers::SHIFT,
                 } => {
-                    if !state.is_search_mode() && !state.is_debug_mode() {
-                        // Shift+Tab navigation in forms
+                    if !state.is_search_mode() && !state.is_comment_input_mode() {
                         if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
                             let prev_state = match state.get_edit_form_state() {
                                 Some(crate::state::EditFormState::Name) => crate::state::EditFormState::Section,
@@ -657,7 +763,6 @@ impl Handler {
                                 Some(crate::state::EditFormState::Assignee) => crate::state::EditFormState::Notes,
                                 Some(crate::state::EditFormState::DueDate) => crate::state::EditFormState::Assignee,
                                 Some(crate::state::EditFormState::Section) => crate::state::EditFormState::DueDate,
-                                Some(crate::state::EditFormState::Tags) => crate::state::EditFormState::Section,
                                 None => crate::state::EditFormState::Name,
                             };
                             state.set_edit_form_state(Some(prev_state));

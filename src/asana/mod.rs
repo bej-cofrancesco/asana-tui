@@ -89,6 +89,9 @@ impl Asana {
             .map(|p| Project {
                 gid: p.gid,
                 name: p.name,
+                archived: false,
+                color: String::new(),
+                notes: String::new(),
             })
             .collect())
     }
@@ -344,9 +347,14 @@ impl Asana {
         // TODO: Implement proper subtasks fetching
         let subtasks: Vec<String> = vec![];
 
-        // Get stories/comments count - for now, just return 0 to avoid API errors
-        // TODO: Implement proper stories fetching
-        let stories: Vec<String> = vec![];
+        // Get stories/comments
+        let stories = match self.get_task_stories(task_gid).await {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("Failed to fetch stories for task {}: {}", task_gid, e);
+                vec![]
+            }
+        };
 
         Ok(Task {
             gid: task_data.gid,
@@ -413,11 +421,14 @@ impl Asana {
     pub async fn get_project_sections(&mut self, project_gid: &str) -> Result<Vec<Section>> {
         debug!("Fetching sections for project GID {}...", project_gid);
 
+        model!(ProjectModel "projects" { name: String });
         model!(SectionModel "sections" { name: String });
 
+        // Use the relational endpoint: GET /projects/{project_gid}/sections
         let data: Vec<SectionModel> = self
             .client
-            .list_paginated::<SectionModel>(Some(vec![("project", project_gid)]), Some(100))
+            .from::<ProjectModel>(project_gid)
+            .list_paginated::<SectionModel>(None, Some(100))
             .await?;
 
         Ok(data
@@ -434,29 +445,71 @@ impl Asana {
     pub async fn get_task_stories(&mut self, task_gid: &str) -> Result<Vec<Story>> {
         debug!("Fetching stories/comments for task GID {}...", task_gid);
 
-        model!(UserModel "users" { name: String, email: String });
+        // In story responses, created_by only has gid and resource_type (no name/email)
+        model!(UserModel "users" { name: Option<String>, email: Option<String> });
         model!(StoryModel "stories" {
-            text: String,
+            text: Option<String>,  // Some story types (reminders, reactions) don't have text
             created_at: Option<String>,
             created_by: Option<UserModel>,
+            resource_subtype: Option<String>,
         } UserModel);
+        model!(TaskModel "tasks" { name: String });
 
-        let data: Vec<StoryModel> = self
+        // Use relational endpoint: GET /tasks/{task_gid}/stories
+        let response = self
             .client
-            .list_paginated::<StoryModel>(Some(vec![("resource", task_gid)]), Some(100))
+            .http_client
+            .get(format!(
+                "{}/tasks/{}/stories",
+                &self.client.base_url, task_gid
+            ))
+            .bearer_auth(&self.client.access_token)
+            .send()
             .await?;
 
-        Ok(data
+        // Log the raw response
+        let response_text = response.text().await?;
+        debug!("Stories API response: {}", &response_text);
+
+        // Parse the response
+        let wrapper: Wrapper<Vec<StoryModel>> =
+            serde_json::from_str(&response_text).map_err(|e| {
+                error!(
+                    "Failed to deserialize stories response: {}. Response body: {}",
+                    e, &response_text
+                );
+                e
+            })?;
+
+        Ok(wrapper
+            .data
             .into_iter()
-            .map(|s| Story {
-                gid: s.gid,
-                text: s.text,
-                created_at: s.created_at,
-                created_by: s.created_by.map(|u| User {
-                    gid: u.gid,
-                    name: u.name,
-                    email: u.email,
-                }),
+            .filter_map(|s| {
+                // Skip stories without text (reminders, reactions, etc.)
+                let text = s.text?;
+
+                debug!(
+                    "Story: gid={}, created_by={:?}, text={}",
+                    &s.gid, &s.created_by, &text
+                );
+
+                Some(Story {
+                    gid: s.gid.clone(),
+                    text,
+                    created_at: s.created_at.clone(),
+                    created_by: s.created_by.map(|u| {
+                        debug!(
+                            "  User: gid={}, name={:?}, email={:?}",
+                            &u.gid, &u.name, &u.email
+                        );
+                        User {
+                            gid: u.gid,
+                            name: u.name.unwrap_or_else(|| "Unknown User".to_string()),
+                            email: u.email.unwrap_or_default(),
+                        }
+                    }),
+                    resource_subtype: s.resource_subtype.clone(),
+                })
             })
             .collect())
     }
@@ -466,26 +519,30 @@ impl Asana {
     pub async fn create_story(&mut self, task_gid: &str, text: &str) -> Result<Story> {
         debug!("Creating story/comment on task GID {}...", task_gid);
 
-        model!(UserModel "users" { name: String, email: String });
+        // In story responses, created_by only has gid and resource_type (no name/email)
+        model!(UserModel "users" { name: Option<String>, email: Option<String> });
         model!(StoryModel "stories" {
             text: String,
             created_at: Option<String>,
             created_by: Option<UserModel>,
         } UserModel);
+        model!(TaskModel "tasks" { name: String });
 
         let body = serde_json::json!({
             "data": {
-                "text": text,
-                "resource": task_gid
+                "text": text
             }
         });
 
-        let model: Wrapper<StoryModel> = self
+        // Post to /tasks/{task_gid}/stories
+        let response = self
             .client
+            .from::<TaskModel>(task_gid)
             .call_with_body::<StoryModel>(reqwest::Method::POST, None, None, Some(body))
-            .await?
-            .json()
             .await?;
+
+        // Story creation returns { "data": { ... } } wrapper
+        let model: Wrapper<StoryModel> = response.json().await?;
 
         Ok(Story {
             gid: model.data.gid,
@@ -493,9 +550,10 @@ impl Asana {
             created_at: model.data.created_at,
             created_by: model.data.created_by.map(|u| User {
                 gid: u.gid,
-                name: u.name,
-                email: u.email,
+                name: u.name.unwrap_or_else(|| "Unknown User".to_string()),
+                email: u.email.unwrap_or_default(),
             }),
+            resource_subtype: None, // Not included in create response
         })
     }
 
@@ -605,16 +663,23 @@ impl Asana {
         let mut data = serde_json::json!({});
 
         if let Some(name_val) = name {
-            data["name"] = serde_json::Value::String(name_val.to_string());
+            if !name_val.is_empty() {
+                data["name"] = serde_json::Value::String(name_val.to_string());
+            }
         }
         if let Some(notes_val) = notes {
+            // Notes can be empty string to clear them
             data["notes"] = serde_json::Value::String(notes_val.to_string());
         }
         if let Some(assignee_val) = assignee {
-            data["assignee"] = serde_json::Value::String(assignee_val.to_string());
+            if !assignee_val.is_empty() {
+                data["assignee"] = serde_json::Value::String(assignee_val.to_string());
+            }
         }
         if let Some(due_on_val) = due_on {
-            data["due_on"] = serde_json::Value::String(due_on_val.to_string());
+            if !due_on_val.is_empty() {
+                data["due_on"] = serde_json::Value::String(due_on_val.to_string());
+            }
         }
         if let Some(completed_val) = completed {
             data["completed"] = serde_json::Value::Bool(completed_val);
@@ -624,21 +689,24 @@ impl Asana {
             "data": data
         });
 
-        let model: Wrapper<TaskModel> = self
+        let response = self
             .client
             .call_with_body::<TaskModel>(reqwest::Method::PUT, Some(task_gid), None, Some(body))
-            .await?
-            .json()
             .await?;
+
+        // Check response status
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            anyhow::bail!("Failed to update task: {}", error_text);
+        }
 
         // If section is specified, move task to that section
         if let Some(section_gid) = section {
-            self.add_task_to_section(&model.data.gid, section_gid)
-                .await?;
+            self.add_task_to_section(task_gid, section_gid).await?;
         }
 
-        // Return updated task by fetching it again
-        self.get_task(&model.data.gid).await
+        // Return updated task by fetching it again (ignore the PUT response)
+        self.get_task(task_gid).await
     }
 
     /// Add a task to a section (move task in kanban).

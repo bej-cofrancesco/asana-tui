@@ -27,9 +27,6 @@ pub enum Event {
     GetProjectSections {
         project_gid: String,
     },
-    GetTaskStories {
-        task_gid: String,
-    },
     CreateStory {
         task_gid: String,
         text: String,
@@ -53,10 +50,6 @@ pub enum Event {
         due_on: Option<String>,
         section: Option<String>,
         completed: Option<bool>,
-    },
-    MoveTaskToSection {
-        task_gid: String,
-        section_gid: String,
     },
 }
 
@@ -87,7 +80,6 @@ impl<'a> Handler<'a> {
             Event::RefreshTasks => self.refresh_tasks().await?,
             Event::GetTaskDetail { gid } => self.get_task_detail(gid).await?,
             Event::GetProjectSections { project_gid } => self.get_project_sections(project_gid).await?,
-            Event::GetTaskStories { task_gid } => self.get_task_stories(task_gid).await?,
             Event::CreateStory { task_gid, text } => self.create_story(task_gid, text).await?,
             Event::GetWorkspaceUsers { workspace_gid } => self.get_workspace_users(workspace_gid).await?,
             Event::CreateTask { project_gid, name, notes, assignee, due_on, section } => {
@@ -95,10 +87,7 @@ impl<'a> Handler<'a> {
             },
             Event::UpdateTaskFields { gid, name, notes, assignee, due_on, section, completed } => {
                 self.update_task_fields(gid, name, notes, assignee, due_on, section, completed).await?
-            },
-            Event::MoveTaskToSection { task_gid, section_gid } => {
-                self.move_task_to_section(task_gid, section_gid).await?
-            },
+            }
         }
         Ok(())
     }

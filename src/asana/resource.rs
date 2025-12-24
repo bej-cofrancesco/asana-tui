@@ -2,7 +2,7 @@ use fake::{Dummy, Fake};
 
 /// Defines user data structure.
 ///
-#[derive(Clone, Debug, Dummy, PartialEq)]
+#[derive(Clone, Debug, Dummy, PartialEq, Eq)]
 pub struct User {
     pub gid: String,
     pub name: String,
@@ -11,8 +11,24 @@ pub struct User {
 
 /// Defines workspace data structure.
 ///
-#[derive(Clone, Debug, Dummy, PartialEq)]
+#[derive(Clone, Debug, Dummy, PartialEq, Eq)]
 pub struct Workspace {
+    pub gid: String,
+    pub name: String,
+}
+
+/// Defines section data structure (for kanban boards).
+///
+#[derive(Clone, Debug, Dummy, PartialEq, Eq)]
+pub struct Section {
+    pub gid: String,
+    pub name: String,
+}
+
+/// Defines tag data structure.
+///
+#[derive(Clone, Debug, Dummy, PartialEq, Eq)]
+pub struct Tag {
     pub gid: String,
     pub name: String,
 }
@@ -37,30 +53,15 @@ pub struct Task {
     pub num_comments: usize,
 }
 
-/// Defines section data structure (for kanban boards).
-///
-#[derive(Clone, Debug, Dummy, PartialEq)]
-pub struct Section {
-    pub gid: String,
-    pub name: String,
-}
-
-/// Defines tag data structure.
-///
-#[derive(Clone, Debug, Dummy, PartialEq)]
-pub struct Tag {
-    pub gid: String,
-    pub name: String,
-}
-
 /// Defines story/comment data structure.
 ///
-#[derive(Clone, Debug, Dummy, PartialEq)]
+#[derive(Clone, Debug, Dummy, PartialEq, Eq)]
 pub struct Story {
     pub gid: String,
     pub text: String,
     pub created_at: Option<String>,
     pub created_by: Option<User>,
+    pub resource_subtype: Option<String>, // "comment_added" for comments, system activity otherwise
 }
 
 /// Defines project data structure.
@@ -69,4 +70,7 @@ pub struct Story {
 pub struct Project {
     pub gid: String,
     pub name: String,
+    pub archived: bool,
+    pub color: String,
+    pub notes: String,
 }

@@ -39,7 +39,7 @@ pub fn kanban(frame: &mut Frame, size: Rect, state: &State) {
 
 fn render_kanban_columns(frame: &mut Frame, size: Rect, state: &State) {
     let sections = state.get_sections();
-    let tasks = state.get_tasks();
+    let tasks = state.get_filtered_tasks(); // Use filtered tasks
     let current_column = state.get_kanban_column_index();
     let current_task_index = state.get_kanban_task_index();
 

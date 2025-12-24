@@ -61,24 +61,28 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &State) {
         form_state == EditFormState::Notes,
     );
 
-    // Assignee field
-    let assignee_text = if let Some(assignee_gid) = state.get_form_assignee() {
-        state
-            .get_workspace_users()
-            .iter()
-            .find(|u| u.gid == *assignee_gid)
-            .map(|u| u.name.as_str())
-            .unwrap_or("Unknown")
+    // Assignee field - show dropdown if focused
+    if form_state == EditFormState::Assignee {
+        render_assignee_dropdown(frame, form_chunks[2], state);
     } else {
-        "Unassigned (press Enter to select)"
-    };
-    render_field(
-        frame,
-        form_chunks[2],
-        "Assignee",
-        assignee_text,
-        form_state == EditFormState::Assignee,
-    );
+        let assignee_text = if let Some(assignee_gid) = state.get_form_assignee() {
+            state
+                .get_workspace_users()
+                .iter()
+                .find(|u| u.gid == *assignee_gid)
+                .map(|u| u.name.as_str())
+                .unwrap_or("Unknown")
+        } else {
+            "None (j/k to select, Enter to confirm)"
+        };
+        render_field(
+            frame,
+            form_chunks[2],
+            "Assignee",
+            assignee_text,
+            false,
+        );
+    }
 
     // Due Date field
     render_field(
@@ -89,24 +93,28 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &State) {
         form_state == EditFormState::DueDate,
     );
 
-    // Section field
-    let section_text = if let Some(section_gid) = state.get_form_section() {
-        state
-            .get_sections()
-            .iter()
-            .find(|s| s.gid == *section_gid)
-            .map(|s| s.name.as_str())
-            .unwrap_or("Unknown")
+    // Section field - show dropdown if focused
+    if form_state == EditFormState::Section {
+        render_section_dropdown(frame, form_chunks[4], state);
     } else {
-        "None (press Enter to select)"
-    };
-    render_field(
-        frame,
-        form_chunks[4],
-        "Section",
-        section_text,
-        form_state == EditFormState::Section,
-    );
+        let section_text = if let Some(section_gid) = state.get_form_section() {
+            state
+                .get_sections()
+                .iter()
+                .find(|s| s.gid == *section_gid)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown")
+        } else {
+            "None (j/k to select, Enter to confirm)"
+        };
+        render_field(
+            frame,
+            form_chunks[4],
+            "Section",
+            section_text,
+            false,
+        );
+    }
 }
 
 fn render_field(
@@ -152,4 +160,66 @@ fn render_field(
 
     let paragraph = Paragraph::new(text).block(block);
     frame.render_widget(paragraph, size);
+}
+
+fn render_assignee_dropdown(frame: &mut Frame, size: Rect, state: &State) {
+    use tui::widgets::{List, ListItem};
+    
+    let users = state.get_workspace_users();
+    let selected_index = state.get_assignee_dropdown_index();
+    
+    let items: Vec<ListItem> = users
+        .iter()
+        .enumerate()
+        .map(|(i, user)| {
+            let style = if i == selected_index {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                styling::normal_text_style()
+            };
+            ListItem::new(Spans::from(Span::styled(&user.name, style)))
+        })
+        .collect();
+    
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Assignee (j/k to navigate, Enter to select)")
+        .border_style(styling::active_block_border_style());
+    
+    let list = List::new(items).block(block);
+    frame.render_widget(list, size);
+}
+
+fn render_section_dropdown(frame: &mut Frame, size: Rect, state: &State) {
+    use tui::widgets::{List, ListItem};
+    
+    let sections = state.get_sections();
+    let selected_index = state.get_section_dropdown_index();
+    
+    let items: Vec<ListItem> = sections
+        .iter()
+        .enumerate()
+        .map(|(i, section)| {
+            let style = if i == selected_index {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                styling::normal_text_style()
+            };
+            ListItem::new(Spans::from(Span::styled(&section.name, style)))
+        })
+        .collect();
+    
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Section (j/k to navigate, Enter to select)")
+        .border_style(styling::active_block_border_style());
+    
+    let list = List::new(items).block(block);
+    frame.render_widget(list, size);
 }

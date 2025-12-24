@@ -20,7 +20,7 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
     } else if *state.current_focus() == crate::state::Focus::View {
         match state.current_view() {
             crate::state::View::TaskDetail => {
-                " e: edit, d: delete, c: comment, Esc: back, q: quit"
+                " j/k: scroll comments, e: edit, d: delete, c: comment, Esc: back, q: quit"
             }
             crate::state::View::CreateTask | crate::state::View::EditTask => {
                 " Tab/Shift+Tab: navigate fields, Enter: save, Esc: cancel"
