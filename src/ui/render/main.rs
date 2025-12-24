@@ -5,12 +5,12 @@ use crate::ui::widgets::styling;
 use tui::{
     layout::{Constraint, Direction, Layout, Rect},
     text::{Span, Text},
-    widgets::{Block, Borders, List, Paragraph},
+    widgets::{Block, Borders, Paragraph},
 };
 
 /// Render main widget according to state.
 ///
-pub fn main(frame: &mut Frame, size: Rect, state: &State) {
+pub fn main(frame: &mut Frame, size: Rect, state: &mut State) {
     match state.current_view() {
         View::Welcome => {
             welcome(frame, size, state);
@@ -30,7 +30,7 @@ pub fn main(frame: &mut Frame, size: Rect, state: &State) {
     }
 }
 
-fn welcome(frame: &mut Frame, size: Rect, state: &State) {
+fn welcome(frame: &mut Frame, size: Rect, state: &mut State) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(6), Constraint::Length(94)].as_ref())
@@ -51,40 +51,42 @@ fn welcome(frame: &mut Frame, size: Rect, state: &State) {
     frame.render_widget(content_widget, rows[1]);
 }
 
-fn my_tasks(frame: &mut Frame, size: Rect, state: &State) {
+fn my_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
     let block = view_block("My Tasks", state);
-    let list = task_list(state, size).block(block);
-    frame.render_widget(list, size);
+    let tasks = state.get_tasks().clone();
+    let list = task_list(&tasks).block(block);
+    frame.render_stateful_widget(list, size, state.get_tasks_list_state());
 }
 
-fn recently_modified(frame: &mut Frame, size: Rect, state: &State) {
+fn recently_modified(frame: &mut Frame, size: Rect, state: &mut State) {
     let block = view_block("Recently Modified", state);
-    let list = task_list(state, size).block(block);
-    frame.render_widget(list, size);
+    let tasks = state.get_tasks().clone();
+    let list = task_list(&tasks).block(block);
+    frame.render_stateful_widget(list, size, state.get_tasks_list_state());
 }
 
-fn recently_completed(frame: &mut Frame, size: Rect, state: &State) {
+fn recently_completed(frame: &mut Frame, size: Rect, state: &mut State) {
     let block = view_block("Recently Completed", state);
-    let list = task_list(state, size).block(block);
-    frame.render_widget(list, size);
+    let tasks = state.get_tasks().clone();
+    let list = task_list(&tasks).block(block);
+    frame.render_stateful_widget(list, size, state.get_tasks_list_state());
 }
 
-fn project_tasks(frame: &mut Frame, size: Rect, state: &State) {
-    let title = match state.get_project() {
-        Some(project) => &project.name,
-        None => "Project",
-    };
-    let block = view_block(title, state);
-    let list = task_list(state, size).block(block);
-    frame.render_widget(list, size);
+fn project_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
+    let title = state.get_project()
+        .map(|p| p.name.to_owned())
+        .unwrap_or_else(|| "Project".to_string());
+    let block = view_block(&title, state);
+    let tasks = state.get_tasks().clone();
+    let list = task_list(&tasks).block(block);
+    frame.render_stateful_widget(list, size, state.get_tasks_list_state());
 }
 
-fn task_list(state: &State, size: Rect) -> tui::widgets::List<'_> {
-    if state.get_tasks().is_empty() {
+fn task_list(tasks: &[crate::asana::Task]) -> tui::widgets::List<'_> {
+    if tasks.is_empty() {
         return tui::widgets::List::new(vec![tui::widgets::ListItem::new("Loading...")]);
     }
-    let items: Vec<tui::widgets::ListItem> = state
-        .get_tasks()
+    let items: Vec<tui::widgets::ListItem> = tasks
         .iter()
         .map(|t| tui::widgets::ListItem::new(t.name.to_owned()))
         .collect();
@@ -96,7 +98,7 @@ fn task_list(state: &State, size: Rect) -> tui::widgets::List<'_> {
     list
 }
 
-fn view_block<'a>(title: &'a str, state: &State) -> Block<'a> {
+fn view_block<'a>(title: &'a str, state: &mut State) -> Block<'a> {
     Block::default()
         .borders(Borders::ALL)
         .border_style(match *state.current_focus() {

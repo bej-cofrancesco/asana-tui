@@ -63,6 +63,18 @@ impl Client {
         gid: Option<&str>,
         params: Option<Vec<(&str, &str)>>,
     ) -> Result<Response> {
+        self.call_with_body::<T>(method, gid, params, None).await
+    }
+
+    /// Make request with optional body and return response with model data or error.
+    ///
+    pub(crate) async fn call_with_body<T: Model>(
+        &mut self,
+        method: Method,
+        gid: Option<&str>,
+        params: Option<Vec<(&str, &str)>>,
+        body: Option<serde_json::Value>,
+    ) -> Result<Response> {
         // Add both relational and main endpoints, and entity gid if supplied
         let uri = format!("{}{}/", self.endpoint, T::endpoint());
         let uri = format!(
@@ -92,11 +104,15 @@ impl Client {
         let request_url = format!("{}/{}", &self.base_url, uri);
 
         // Make request
-        Ok(self
+        let mut request = self
             .http_client
             .request(method, &request_url)
-            .header("Authorization", format!("Bearer {}", &self.access_token))
-            .send()
-            .await?)
+            .header("Authorization", format!("Bearer {}", &self.access_token));
+        
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        
+        Ok(request.send().await?)
     }
 }

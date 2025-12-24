@@ -106,7 +106,10 @@ impl Handler {
                             }
                         }
                     }
-                    Focus::View => {}
+                    Focus::View => {
+                        debug!("Processing previous task event '{:?}'...", event);
+                        state.previous_task_index();
+                    }
                 },
                 KeyEvent {
                     code: KeyCode::Char('j'),
@@ -124,7 +127,10 @@ impl Handler {
                             }
                         }
                     }
-                    Focus::View => {}
+                    Focus::View => {
+                        debug!("Processing next task event '{:?}'...", event);
+                        state.next_task_index();
+                    }
                 },
                 KeyEvent {
                     code: KeyCode::Enter,
@@ -145,6 +151,45 @@ impl Handler {
                         }
                     }
                     Focus::View => {}
+                },
+                KeyEvent {
+                    code: KeyCode::Char(' '),
+                    modifiers: KeyModifiers::NONE,
+                }
+                | KeyEvent {
+                    code: KeyCode::Char('x'),
+                    modifiers: KeyModifiers::NONE,
+                } => match state.current_focus() {
+                    Focus::View => {
+                        debug!("Processing toggle task completion event '{:?}'...", event);
+                        state.toggle_task_completion();
+                    }
+                    _ => {}
+                },
+                KeyEvent {
+                    code: KeyCode::Char('d'),
+                    modifiers: KeyModifiers::NONE,
+                } => match state.current_focus() {
+                    Focus::View => {
+                        debug!("Processing delete task event '{:?}'...", event);
+                        state.delete_selected_task();
+                    }
+                    _ => {}
+                },
+                KeyEvent {
+                    code: KeyCode::Char('s'),
+                    modifiers: KeyModifiers::NONE,
+                } => match state.current_focus() {
+                    Focus::Menu => {
+                        debug!("Processing star project event '{:?}'...", event);
+                        match state.current_menu() {
+                            Menu::TopList => {
+                                state.toggle_star_current_project();
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
                 },
                 _ => {
                     debug!("Skipping processing of terminal event '{:?}'...", event);

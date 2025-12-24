@@ -12,7 +12,7 @@ const BLOCK_TITLE: &str = "Status";
 
 /// Render status widget according to state.
 ///
-pub fn status(frame: &mut Frame, size: Rect, state: &State) {
+pub fn status(frame: &mut Frame, size: Rect, state: &mut State) {
     let mut block = Block::default()
         .title(BLOCK_TITLE)
         .borders(Borders::ALL)

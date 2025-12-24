@@ -4,15 +4,15 @@ use crate::state::{Focus, Menu, State};
 use crate::ui::widgets::styling;
 use tui::{
     layout::Rect,
-    text::{Span, Spans},
-    widgets::{Block, Borders, Paragraph},
+    text::Span,
+    widgets::{Block, Borders, List, ListItem},
 };
 
 const BLOCK_TITLE: &str = "Projects";
 
 /// Render top list widget according to state.
 ///
-pub fn top_list(frame: &mut Frame, size: Rect, state: &State) {
+pub fn top_list(frame: &mut Frame, size: Rect, state: &mut State) {
     let mut block = Block::default()
         .title(BLOCK_TITLE)
         .borders(Borders::ALL)
@@ -36,22 +36,23 @@ pub fn top_list(frame: &mut Frame, size: Rect, state: &State) {
         return;
     }
 
-    let items: Vec<Spans> = state
+    let items: Vec<ListItem> = state
         .get_projects()
         .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            let span;
-            if i == *state.current_top_list_index() {
-                span = Span::styled(p.name.to_owned(), list_item_style);
+        .map(|p| {
+            let display_name = if state.is_project_starred(&p.gid) {
+                format!("⭐ {}", p.name)
             } else {
-                span = Span::raw(p.name.to_owned());
-            }
-            Spans::from(vec![span])
+                p.name.to_owned()
+            };
+            ListItem::new(display_name)
         })
         .collect();
-    let list = Paragraph::new(items)
+    
+    let list = List::new(items)
         .style(styling::normal_text_style())
+        .highlight_style(list_item_style)
         .block(block);
-    frame.render_widget(list, size);
+    
+    frame.render_stateful_widget(list, size, state.get_projects_list_state());
 }

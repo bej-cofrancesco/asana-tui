@@ -4,7 +4,7 @@ use tui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Render all to terminal frame according to state.
 ///
-pub fn all(frame: &mut Frame, state: &State) {
+pub fn all(frame: &mut Frame, state: &mut State) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)].as_ref())
@@ -22,7 +22,7 @@ pub fn all(frame: &mut Frame, state: &State) {
 
 /// Render left widgets to terminal frame according to state.
 ///
-fn left(frame: &mut Frame, size: Rect, state: &State) {
+fn left(frame: &mut Frame, size: Rect, state: &mut State) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -39,7 +39,7 @@ fn left(frame: &mut Frame, size: Rect, state: &State) {
 
 /// Render right widgets to terminal frame according to state.
 ///
-fn right(frame: &mut Frame, size: Rect, state: &State) {
+fn right(frame: &mut Frame, size: Rect, state: &mut State) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(8)])

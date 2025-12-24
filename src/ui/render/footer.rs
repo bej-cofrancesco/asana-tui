@@ -11,7 +11,7 @@ use tui::{
 ///
 pub fn footer(frame: &mut Frame, size: Rect) {
     let controls_content = Spans::from(vec![Span::styled(
-        "j k h l: navigate, enter: select, esc: cancel, q: quit",
+        "j k h l: navigate, s: add/remove shortcut, /: search, enter: select, esc: cancel, q: quit",
         Style::default().fg(YELLOW),
     )]);
     let controls_widget = Paragraph::new(controls_content).alignment(Alignment::Left);

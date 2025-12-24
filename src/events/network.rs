@@ -12,6 +12,14 @@ pub enum Event {
     Me,
     ProjectTasks,
     MyTasks,
+    UpdateTask {
+        gid: String,
+        completed: Option<bool>,
+    },
+    DeleteTask {
+        gid: String,
+    },
+    RefreshTasks,
 }
 
 /// Specify struct for managing state with network events.
@@ -36,6 +44,9 @@ impl<'a> Handler<'a> {
             Event::Me => self.me().await?,
             Event::ProjectTasks => self.project_tasks().await?,
             Event::MyTasks => self.my_tasks().await?,
+            Event::UpdateTask { gid, completed } => self.update_task(gid, completed).await?,
+            Event::DeleteTask { gid } => self.delete_task(gid).await?,
+            Event::RefreshTasks => self.refresh_tasks().await?,
         }
         Ok(())
     }
@@ -99,6 +110,74 @@ impl<'a> Handler<'a> {
         let mut state = self.state.lock().await;
         state.set_tasks(my_tasks);
         info!("Received incomplete tasks assigned to user.");
+        Ok(())
+    }
+
+    /// Update a task (e.g., mark as complete/incomplete).
+    ///
+    async fn update_task(&mut self, task_gid: String, completed: Option<bool>) -> Result<()> {
+        info!("Updating task {}...", task_gid);
+        self.asana.update_task(&task_gid, completed).await?;
+        info!("Task {} updated successfully.", task_gid);
+        // Refresh the current task list
+        let view;
+        {
+            let state = self.state.lock().await;
+            view = state.current_view().clone();
+        }
+        match view {
+            crate::state::View::MyTasks => {
+                self.my_tasks().await?;
+            }
+            crate::state::View::ProjectTasks => {
+                self.project_tasks().await?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Delete a task.
+    ///
+    async fn delete_task(&mut self, task_gid: String) -> Result<()> {
+        info!("Deleting task {}...", task_gid);
+        self.asana.delete_task(&task_gid).await?;
+        info!("Task {} deleted successfully.", task_gid);
+        // Refresh the current task list
+        let view;
+        {
+            let state = self.state.lock().await;
+            view = state.current_view().clone();
+        }
+        match view {
+            crate::state::View::MyTasks => {
+                self.my_tasks().await?;
+            }
+            crate::state::View::ProjectTasks => {
+                self.project_tasks().await?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Refresh the current task list.
+    ///
+    async fn refresh_tasks(&mut self) -> Result<()> {
+        let view;
+        {
+            let state = self.state.lock().await;
+            view = state.current_view().clone();
+        }
+        match view {
+            crate::state::View::MyTasks => {
+                self.my_tasks().await?;
+            }
+            crate::state::View::ProjectTasks => {
+                self.project_tasks().await?;
+            }
+            _ => {}
+        }
         Ok(())
     }
 }

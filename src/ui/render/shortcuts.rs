@@ -1,5 +1,5 @@
 use super::Frame;
-use crate::state::{Focus, Menu, State, SHORTCUTS};
+use crate::state::{Focus, Menu, State};
 use crate::ui::widgets::styling;
 use tui::{
     layout::Rect,
@@ -11,7 +11,7 @@ const BLOCK_TITLE: &str = "Shortcuts";
 
 /// Render shortcuts widget according to state.
 ///
-pub fn shortcuts(frame: &mut Frame, size: Rect, state: &State) {
+pub fn shortcuts(frame: &mut Frame, size: Rect, state: &mut State) {
     let mut block = Block::default()
         .title(BLOCK_TITLE)
         .borders(Borders::ALL)
@@ -28,7 +28,8 @@ pub fn shortcuts(frame: &mut Frame, size: Rect, state: &State) {
         list_item_style = styling::active_list_item_style();
     }
 
-    let text: Vec<Spans> = SHORTCUTS
+    let all_shortcuts = state.get_all_shortcuts();
+    let text: Vec<Spans> = all_shortcuts
         .iter()
         .enumerate()
         .map(|(i, s)| {

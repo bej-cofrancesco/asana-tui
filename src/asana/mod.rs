@@ -9,6 +9,7 @@ use anyhow::Result;
 use chrono::prelude::*;
 use client::Client;
 use log::*;
+use models::Wrapper;
 
 /// Responsible for asynchronous interaction with the Asana API including
 /// transformation of response data into explicitly-defined types.
@@ -132,6 +133,60 @@ impl Asana {
                 name: t.name,
             })
             .collect())
+    }
+
+    /// Update a task (e.g., mark as complete/incomplete).
+    ///
+    pub async fn update_task(&mut self, task_gid: &str, completed: Option<bool>) -> Result<Task> {
+        debug!("Updating task GID {}...", task_gid);
+
+        model!(TaskModel "tasks" { name: String });
+
+        let body = if let Some(completed) = completed {
+            serde_json::json!({
+                "data": {
+                    "completed": completed
+                }
+            })
+        } else {
+            serde_json::json!({})
+        };
+
+        let model: Wrapper<TaskModel> = self
+            .client
+            .call_with_body::<TaskModel>(
+                reqwest::Method::PUT,
+                Some(task_gid),
+                None,
+                Some(body),
+            )
+            .await?
+            .json()
+            .await?;
+
+        Ok(Task {
+            gid: model.data.gid,
+            name: model.data.name,
+        })
+    }
+
+    /// Delete a task.
+    ///
+    pub async fn delete_task(&mut self, task_gid: &str) -> Result<()> {
+        debug!("Deleting task GID {}...", task_gid);
+
+        model!(TaskModel "tasks" { name: String });
+
+        self.client
+            .call_with_body::<TaskModel>(
+                reqwest::Method::DELETE,
+                Some(task_gid),
+                None,
+                None,
+            )
+            .await?;
+
+        Ok(())
     }
 }
 

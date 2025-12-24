@@ -99,7 +99,7 @@ impl App {
             if let Ok(size) = terminal.backend().size() {
                 state.set_terminal_size(size);
             };
-            terminal.draw(|frame| crate::ui::render(frame, &state))?;
+            terminal.draw(|frame| crate::ui::render(frame, &mut state))?;
             if !terminal_event_handler.handle_next(&mut state)? {
                 debug!("Received application exit request.");
                 break;

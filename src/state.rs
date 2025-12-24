@@ -3,7 +3,9 @@ use crate::asana::{Project, Task, User, Workspace};
 use crate::events::network::Event as NetworkEvent;
 use crate::ui::SPINNER_FRAME_COUNT;
 use log::*;
+use std::collections::HashSet;
 use tui::layout::Rect;
+use tui::widgets::ListState;
 
 /// Specifying the different foci.
 ///
@@ -24,7 +26,7 @@ pub enum Menu {
 
 /// Specifying the different views.
 ///
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum View {
     Welcome,
     MyTasks,
@@ -54,6 +56,9 @@ pub struct State {
     tasks: Vec<Task>,
     projects: Vec<Project>,
     project: Option<Project>,
+    projects_list_state: ListState,
+    tasks_list_state: ListState,
+    starred_projects: HashSet<String>,
 }
 
 /// Defines default application state.
@@ -75,6 +80,9 @@ impl Default for State {
             tasks: vec![],
             projects: vec![],
             project: None,
+            projects_list_state: ListState::default(),
+            tasks_list_state: ListState::default(),
+            starred_projects: HashSet::new(),
         }
     }
 }
@@ -215,8 +223,13 @@ impl State {
     /// Activate the next shortcut.
     ///
     pub fn next_shortcut_index(&mut self) -> &mut Self {
+        let all_shortcuts = self.get_all_shortcuts();
+        if all_shortcuts.is_empty() {
+            self.current_shortcut_index = 0;
+            return self;
+        }
         self.current_shortcut_index += 1;
-        if self.current_shortcut_index >= SHORTCUTS.len() {
+        if self.current_shortcut_index >= all_shortcuts.len() {
             self.current_shortcut_index = 0;
         }
         self
@@ -225,10 +238,15 @@ impl State {
     /// Activate the previous shortcut.
     ///
     pub fn previous_shortcut_index(&mut self) -> &mut Self {
+        let all_shortcuts = self.get_all_shortcuts();
+        if all_shortcuts.is_empty() {
+            self.current_shortcut_index = 0;
+            return self;
+        }
         if self.current_shortcut_index > 0 {
             self.current_shortcut_index -= 1;
         } else {
-            self.current_shortcut_index = SHORTCUTS.len() - 1;
+            self.current_shortcut_index = all_shortcuts.len() - 1;
         }
         self
     }
@@ -237,7 +255,15 @@ impl State {
     ///
     pub fn select_current_shortcut_index(&mut self) -> &mut Self {
         self.view_stack.clear();
-        match SHORTCUTS[self.current_shortcut_index] {
+        let all_shortcuts = self.get_all_shortcuts();
+        if all_shortcuts.is_empty() || self.current_shortcut_index >= all_shortcuts.len() {
+            return self;
+        }
+        
+        let shortcut = &all_shortcuts[self.current_shortcut_index];
+        
+        // Check if it's a static shortcut
+        match shortcut.as_str() {
             "My Tasks" => {
                 self.tasks.clear();
                 self.dispatch(NetworkEvent::MyTasks);
@@ -251,7 +277,18 @@ impl State {
                 self.tasks.clear();
                 self.view_stack.push(View::RecentlyCompleted);
             }
-            _ => (),
+            _ => {
+                // It's a starred project (starts with "⭐ ")
+                if shortcut.starts_with("⭐ ") {
+                    let project_name = &shortcut[2..]; // Remove "⭐ " prefix
+                    if let Some(project) = self.projects.iter().find(|p| p.name == project_name) {
+                        self.project = Some(project.to_owned());
+                        self.tasks.clear();
+                        self.dispatch(NetworkEvent::ProjectTasks);
+                        self.view_stack.push(View::ProjectTasks);
+                    }
+                }
+            }
         }
         self.focus_view();
         self
@@ -264,6 +301,9 @@ impl State {
         if self.current_top_list_index >= self.projects.len() {
             self.current_top_list_index = 0;
         }
+        if !self.projects.is_empty() {
+            self.projects_list_state.select(Some(self.current_top_list_index));
+        }
         self
     }
 
@@ -274,6 +314,9 @@ impl State {
             self.current_top_list_index -= 1;
         } else if !self.projects.is_empty() {
             self.current_top_list_index = self.projects.len() - 1;
+        }
+        if !self.projects.is_empty() {
+            self.projects_list_state.select(Some(self.current_top_list_index));
         }
         self
     }
@@ -315,6 +358,11 @@ impl State {
     ///
     pub fn set_tasks(&mut self, tasks: Vec<Task>) -> &mut Self {
         self.tasks = tasks;
+        if !self.tasks.is_empty() {
+            self.tasks_list_state.select(Some(0));
+        } else {
+            self.tasks_list_state.select(None);
+        }
         self
     }
 
@@ -328,6 +376,14 @@ impl State {
     ///
     pub fn set_projects(&mut self, projects: Vec<Project>) -> &mut Self {
         self.projects = projects;
+        if !self.projects.is_empty() && self.current_top_list_index < self.projects.len() {
+            self.projects_list_state.select(Some(self.current_top_list_index));
+        } else if !self.projects.is_empty() {
+            self.current_top_list_index = 0;
+            self.projects_list_state.select(Some(0));
+        } else {
+            self.projects_list_state.select(None);
+        }
         self
     }
 
@@ -335,6 +391,146 @@ impl State {
     ///
     pub fn get_project(&self) -> Option<&Project> {
         self.project.as_ref()
+    }
+
+    /// Return the projects list state.
+    ///
+    pub fn get_projects_list_state(&mut self) -> &mut ListState {
+        &mut self.projects_list_state
+    }
+
+    /// Return the tasks list state.
+    ///
+    pub fn get_tasks_list_state(&mut self) -> &mut ListState {
+        &mut self.tasks_list_state
+    }
+
+    /// Return the current task index.
+    ///
+    pub fn current_task_index(&self) -> Option<usize> {
+        self.tasks_list_state.selected()
+    }
+
+    /// Activate the next task.
+    ///
+    pub fn next_task_index(&mut self) -> &mut Self {
+        let selected = self.tasks_list_state.selected();
+        let next = match selected {
+            Some(i) => {
+                if i + 1 < self.tasks.len() {
+                    Some(i + 1)
+                } else {
+                    Some(0)
+                }
+            }
+            None => {
+                if !self.tasks.is_empty() {
+                    Some(0)
+                } else {
+                    None
+                }
+            }
+        };
+        self.tasks_list_state.select(next);
+        self
+    }
+
+    /// Activate the previous task.
+    ///
+    pub fn previous_task_index(&mut self) -> &mut Self {
+        let selected = self.tasks_list_state.selected();
+        let prev = match selected {
+            Some(i) => {
+                if i > 0 {
+                    Some(i - 1)
+                } else if !self.tasks.is_empty() {
+                    Some(self.tasks.len() - 1)
+                } else {
+                    None
+                }
+            }
+            None => {
+                if !self.tasks.is_empty() {
+                    Some(self.tasks.len() - 1)
+                } else {
+                    None
+                }
+            }
+        };
+        self.tasks_list_state.select(prev);
+        self
+    }
+
+    /// Toggle completion status of the selected task.
+    ///
+    pub fn toggle_task_completion(&mut self) -> &mut Self {
+        if let Some(task_index) = self.tasks_list_state.selected() {
+            if let Some(task) = self.tasks.get(task_index) {
+                // For now, we'll always toggle to completed=true
+                // In a full implementation, we'd check the current status
+                self.dispatch(NetworkEvent::UpdateTask {
+                    gid: task.gid.to_owned(),
+                    completed: Some(true),
+                });
+            }
+        }
+        self
+    }
+
+    /// Delete the selected task.
+    ///
+    pub fn delete_selected_task(&mut self) -> &mut Self {
+        if let Some(task_index) = self.tasks_list_state.selected() {
+            if let Some(task) = self.tasks.get(task_index) {
+                self.dispatch(NetworkEvent::DeleteTask {
+                    gid: task.gid.to_owned(),
+                });
+            }
+        }
+        self
+    }
+
+    /// Toggle star status of the currently selected project.
+    ///
+    pub fn toggle_star_current_project(&mut self) -> &mut Self {
+        if let Some(project_index) = self.projects_list_state.selected() {
+            if let Some(project) = self.projects.get(project_index) {
+                if self.starred_projects.contains(&project.gid) {
+                    self.starred_projects.remove(&project.gid);
+                } else {
+                    self.starred_projects.insert(project.gid.to_owned());
+                }
+            }
+        }
+        self
+    }
+
+    /// Check if a project is starred.
+    ///
+    pub fn is_project_starred(&self, project_gid: &str) -> bool {
+        self.starred_projects.contains(project_gid)
+    }
+
+    /// Get all starred projects.
+    ///
+    pub fn get_starred_projects(&self) -> Vec<&Project> {
+        self.projects
+            .iter()
+            .filter(|p| self.starred_projects.contains(&p.gid))
+            .collect()
+    }
+
+    /// Get all shortcuts (static shortcuts + starred projects).
+    ///
+    pub fn get_all_shortcuts(&self) -> Vec<String> {
+        let mut shortcuts: Vec<String> = SHORTCUTS.iter().map(|s| s.to_string()).collect();
+        let starred: Vec<String> = self
+            .get_starred_projects()
+            .iter()
+            .map(|p| format!("⭐ {}", p.name))
+            .collect();
+        shortcuts.extend(starred);
+        shortcuts
     }
 
     /// Dispatches an asynchronous network event.
