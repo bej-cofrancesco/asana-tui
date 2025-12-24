@@ -65,14 +65,17 @@ impl Asana {
     /// Returns a vector of projects for the workspace.
     ///
     pub async fn projects(&mut self, workspace_gid: &str) -> Result<Vec<Project>> {
-        debug!("Requesting projects for workspace GID {}...", workspace_gid);
+        debug!("Requesting projects for workspace GID {} (with pagination)...", workspace_gid);
 
         model!(ProjectModel "projects" { name: String });
 
+        // Use pagination to handle workspaces with many projects
         let data: Vec<ProjectModel> = self
             .client
-            .list::<ProjectModel>(Some(vec![("workspace", workspace_gid)]))
+            .list_paginated::<ProjectModel>(Some(vec![("workspace", workspace_gid)]), Some(100))
             .await?;
+
+        debug!("Retrieved {} projects for workspace GID {}", data.len(), workspace_gid);
 
         Ok(data
             .into_iter()
@@ -84,16 +87,31 @@ impl Asana {
     }
 
     /// Returns a vector of tasks for the project.
+    /// By default, only fetches incomplete tasks for efficiency.
     ///
-    pub async fn tasks(&mut self, project_gid: &str) -> Result<Vec<Task>> {
-        debug!("Requesting tasks for project GID {}...", project_gid);
+    pub async fn tasks(&mut self, project_gid: &str, workspace_gid: Option<&str>) -> Result<Vec<Task>> {
+        debug!("Requesting incomplete tasks for project GID {} (with pagination)...", project_gid);
 
         model!(TaskModel "tasks" { name: String });
 
+        // Build query parameters - workspace is required for pagination per Asana API docs
+        // Only fetch incomplete tasks by default for efficiency
+        let mut params = vec![("project", project_gid)];
+        if let Some(workspace) = workspace_gid {
+            params.push(("workspace", workspace));
+        }
+        // Filter to only incomplete tasks - much more efficient for large projects
+        // Using a date far in the future ensures we only get incomplete tasks
+        let completed_since = Utc::now().format("%Y-%m-%dT%H:%M:%S%.fZ").to_string();
+        params.push(("completed_since", completed_since.as_str()));
+
+        // Use pagination to handle large result sets
         let data: Vec<TaskModel> = self
             .client
-            .list::<TaskModel>(Some(vec![("project", project_gid)]))
+            .list_paginated::<TaskModel>(Some(params), Some(100))
             .await?;
+
+        debug!("Retrieved {} incomplete tasks for project GID {}", data.len(), project_gid);
 
         Ok(data
             .into_iter()
@@ -108,23 +126,26 @@ impl Asana {
     ///
     pub async fn my_tasks(&mut self, user_gid: &str, workspace_gid: &str) -> Result<Vec<Task>> {
         debug!(
-            "Requesting tasks for user GID {} and workspace GID {}...",
+            "Requesting tasks for user GID {} and workspace GID {} (with pagination)...",
             user_gid, workspace_gid
         );
 
         model!(TaskModel "tasks" { name: String });
 
+        // Use pagination to handle large result sets
         let data: Vec<TaskModel> = self
             .client
-            .list::<TaskModel>(Some(vec![
+            .list_paginated::<TaskModel>(Some(vec![
                 ("assignee", user_gid),
                 ("workspace", workspace_gid),
                 (
                     "completed_since",
                     &Utc::now().format("%Y-%m-%dT%H:%M:%S%.fZ").to_string(),
                 ),
-            ]))
+            ]), Some(100))
             .await?;
+
+        debug!("Retrieved {} tasks for user GID {}", data.len(), user_gid);
 
         Ok(data
             .into_iter()
@@ -320,7 +341,7 @@ mod tests {
         let mut asana = Asana {
             client: Client::new(&token.to_string(), &server.base_url()),
         };
-        asana.tasks(&project.gid).await?;
+        asana.tasks(&project.gid, None).await?;
         mock.assert_async().await;
         Ok(())
     }

@@ -38,13 +38,153 @@ impl Client {
     ///
     #[allow(dead_code)]
     pub async fn list<T: Model>(&mut self, params: Option<Vec<(&str, &str)>>) -> Result<Vec<T>> {
-        let model: ListWrapper<T> = self
-            .call::<T>(Method::GET, None, params)
-            .await?
-            .json()
-            .await?;
+        self.list_paginated::<T>(params, Some(100)).await
+    }
+
+    /// Return vector of model data with pagination support.
+    /// Uses Asana's token-based pagination as per https://developers.asana.com/docs/pagination
+    ///
+    pub async fn list_paginated<T: Model>(
+        &mut self,
+        params: Option<Vec<(&str, &str)>>,
+        limit: Option<usize>,
+    ) -> Result<Vec<T>> {
+        let limit = limit.unwrap_or(100); // Default to 100 items per page (Asana's max)
+        let mut all_data = Vec::new();
+        let mut offset_token: Option<String> = None;
+        let mut page = 0;
+
+        loop {
+            // Build params with owned strings stored in variables that live long enough
+            let mut page_params_vec: Vec<(String, String)> = Vec::new();
+
+            // Add original params if any (convert to owned strings)
+            if let Some(ref original_params) = params {
+                for (k, v) in original_params.iter() {
+                    page_params_vec.push((k.to_string(), v.to_string()));
+                }
+            }
+
+            // Add pagination parameters
+            page_params_vec.push(("limit".to_string(), limit.to_string()));
+            if let Some(ref offset) = offset_token {
+                page_params_vec.push(("offset".to_string(), offset.clone()));
+            }
+
+            // Convert to string slices for the call
+            let page_params: Vec<(&str, &str)> = page_params_vec
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+
+            let response = self.call::<T>(Method::GET, None, Some(page_params)).await?;
+            let status = response.status();
+
+            // Check status before trying to deserialize
+            if !status.is_success() {
+                let response_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| String::from("Unable to read response"));
+                log::error!(
+                    "API request failed with status {}: {}",
+                    status,
+                    response_text
+                );
+                anyhow::bail!(
+                    "API request failed with status {}: {}",
+                    status,
+                    response_text
+                );
+            }
+
+            // Clone the response bytes so we can log them if deserialization fails
+            let response_bytes = response.bytes().await?;
+            let response_text = String::from_utf8_lossy(&response_bytes);
+
+            // Try to deserialize, with better error message if it fails
+            match serde_json::from_slice::<ListWrapper<T>>(&response_bytes) {
+                Ok(model) => {
+                    let page_data = model.data;
+                    let page_size = page_data.len();
+                    all_data.extend(page_data);
+
+                    log::debug!(
+                        "Fetched page {}: {} items (total so far: {})",
+                        page,
+                        page_size,
+                        all_data.len()
+                    );
+
+                    // Asana pagination: if we got fewer items than the limit, we're done
+                    if page_size < limit {
+                        // Got fewer items than requested, we're done
+                        break;
+                    }
+
+                    // Extract offset token from next_page for the next request
+                    // Asana uses token-based pagination, not numeric offsets
+                    offset_token = model.next_page.map(|next| next.offset);
+
+                    // If there's no next_page token, we're done
+                    if offset_token.is_none() {
+                        break;
+                    }
+
+                    // If we got no items, we're done
+                    if page_size == 0 {
+                        break;
+                    }
+
+                    page += 1;
+                }
+                Err(e) => {
+                    // Check if the response is empty or has a different structure
+                    if response_bytes.is_empty() {
+                        log::warn!("Received empty response from API, returning collected data");
+                        self.endpoint.clear();
+                        break;
+                    }
+
+                    // Try to parse as JSON to see if it's an error response
+                    if let Ok(json_value) =
+                        serde_json::from_slice::<serde_json::Value>(&response_bytes)
+                    {
+                        // Check if it's an error response
+                        if json_value.get("errors").is_some() {
+                            let errors = json_value.get("errors").and_then(|e| e.as_array());
+                            log::error!("API returned errors: {:?}", errors);
+                            anyhow::bail!("API returned errors: {:?}", errors);
+                        }
+                        // Check if it's missing the data field but otherwise valid JSON
+                        if json_value.get("data").is_none() {
+                            log::warn!("API response missing 'data' field, but otherwise valid. Response: {}", response_text);
+                            self.endpoint.clear();
+                            break;
+                        }
+                    }
+
+                    log::error!(
+                        "Failed to deserialize API response: {}. Response body: {}",
+                        e,
+                        response_text
+                    );
+                    anyhow::bail!(
+                        "Failed to deserialize API response: {}. Response body: {}",
+                        e,
+                        response_text
+                    );
+                }
+            }
+        }
+
         self.endpoint.clear();
-        Ok(model.data)
+        log::debug!(
+            "Completed paginated fetch: {} total items across {} pages",
+            all_data.len(),
+            page + 1
+        );
+        Ok(all_data)
     }
 
     /// Prepare endpoint for relational model data.
@@ -108,11 +248,11 @@ impl Client {
             .http_client
             .request(method, &request_url)
             .header("Authorization", format!("Bearer {}", &self.access_token));
-        
+
         if let Some(body) = body {
             request = request.json(&body);
         }
-        
+
         Ok(request.send().await?)
     }
 }

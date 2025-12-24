@@ -46,5 +46,5 @@ fn right(frame: &mut Frame, size: Rect, state: &mut State) {
         .split(size);
 
     main(frame, rows[0], state);
-    log(frame, rows[1]);
+    log(frame, rows[1], state);
 }

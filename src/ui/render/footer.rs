@@ -12,25 +12,36 @@ use tui::{
 ///
 pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
     let controls_text = if state.is_search_mode() {
-        "Type to search, / or Esc: exit search"
+        " Type to search, / or Esc: exit search"
+    } else if state.is_debug_mode() {
+        " j/k: navigate logs, y: copy log, / or Esc: exit debug mode"
     } else {
-        "j k h l: navigate, s: add/remove shortcut, /: search, enter: select, esc: cancel, q: quit"
+        "j k h l: navigate, s: add/remove shortcut, /: search, d: debug mode, enter: select, esc: cancel, q: quit"
     };
-    
+
     let controls_content = if state.is_search_mode() {
         // Show search mode indicator with different styling
         Spans::from(vec![
             Span::styled(
-                "SEARCH MODE: ",
+                "SEARCH MODE:",
                 Style::default()
                     .fg(Color::White)
                     .bg(Color::Blue)
                     .add_modifier(Modifier::BOLD),
             ),
+            Span::styled(controls_text, Style::default().fg(YELLOW)),
+        ])
+    } else if state.is_debug_mode() {
+        // Show debug mode indicator with different styling
+        Spans::from(vec![
             Span::styled(
-                controls_text,
-                Style::default().fg(YELLOW),
+                "DEBUG MODE:",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             ),
+            Span::styled(controls_text, Style::default().fg(YELLOW)),
         ])
     } else {
         Spans::from(vec![Span::styled(
@@ -38,7 +49,7 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
             Style::default().fg(YELLOW),
         )])
     };
-    
+
     let controls_widget = Paragraph::new(controls_content).alignment(Alignment::Left);
 
     let version_content = Spans::from(vec![Span::styled(

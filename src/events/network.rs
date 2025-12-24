@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 
 /// Specify different network event types.
 ///
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Event {
     Me,
     ProjectTasks,
@@ -19,6 +19,7 @@ pub enum Event {
     DeleteTask {
         gid: String,
     },
+    #[allow(dead_code)]
     RefreshTasks,
 }
 
@@ -79,6 +80,7 @@ impl<'a> Handler<'a> {
     ///
     async fn project_tasks(&mut self) -> Result<()> {
         let project;
+        let workspace_gid;
         {
             let state = self.state.lock().await;
             if state.get_project().is_none() {
@@ -86,13 +88,41 @@ impl<'a> Handler<'a> {
                 return Ok(());
             }
             project = state.get_project().unwrap().to_owned();
+            workspace_gid = state.get_active_workspace().map(|w| w.gid.to_owned());
         }
-        info!("Fetching tasks for project '{}'...", &project.name);
-        let tasks = self.asana.tasks(&project.gid).await?;
-        info!("Received tasks for project '{}'.", &project.name);
-        let mut state = self.state.lock().await;
-        state.set_tasks(tasks);
-        Ok(())
+        info!(
+            "Fetching tasks for project '{}' (GID: {})...",
+            &project.name, &project.gid
+        );
+        match self
+            .asana
+            .tasks(&project.gid, workspace_gid.as_deref())
+            .await
+        {
+            Ok(tasks) => {
+                info!(
+                    "Received {} tasks for project '{}'.",
+                    tasks.len(),
+                    &project.name
+                );
+                let mut state = self.state.lock().await;
+                state.set_tasks(tasks);
+                Ok(())
+            }
+            Err(e) => {
+                error!(
+                    "Failed to fetch tasks for project '{}' (GID: {}): {}",
+                    &project.name, &project.gid, e
+                );
+                // Log the full error chain
+                let mut source = e.source();
+                while let Some(err) = source {
+                    error!("  Project tasks error chain - Caused by: {}", err);
+                    source = err.source();
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Update state with tasks assigned to the user.

@@ -66,13 +66,16 @@ pub struct State {
     project: Option<Project>,
     projects_list_state: ListState,
     tasks_list_state: ListState,
-    starred_projects: HashSet<String>, // GIDs
+    starred_projects: HashSet<String>,              // GIDs
     starred_project_names: HashMap<String, String>, // GID -> Name
     search_query: String,
     search_mode: bool,
     search_target: Option<SearchTarget>,
     filtered_projects: Vec<Project>,
     filtered_tasks: Vec<Task>,
+    debug_mode: bool,
+    debug_index: usize,
+    debug_entries: Vec<String>, // Store log entries for navigation and copying
 }
 
 /// Specifies which panel is being searched.
@@ -113,17 +116,26 @@ impl Default for State {
             search_target: None,
             filtered_projects: vec![],
             filtered_tasks: vec![],
+            debug_mode: false,
+            debug_index: 0,
+            debug_entries: vec![],
         }
     }
 }
 
 impl State {
-    pub fn new(net_sender: NetworkEventSender, config_save_sender: crate::app::ConfigSaveSender, starred_projects: Vec<String>, starred_project_names: HashMap<String, String>) -> Self {
+    pub fn new(
+        net_sender: NetworkEventSender,
+        config_save_sender: crate::app::ConfigSaveSender,
+        starred_projects: Vec<String>,
+        starred_project_names: HashMap<String, String>,
+    ) -> Self {
         State {
             net_sender: Some(net_sender),
             config_save_sender: Some(config_save_sender),
             starred_projects: starred_projects.into_iter().collect(),
             starred_project_names,
+            debug_entries: vec![], // Initialize empty, will be populated by logger
             ..State::default()
         }
     }
@@ -248,11 +260,13 @@ impl State {
     }
 
     /// Return the current shortcut index (for backward compatibility).
+    /// Used in tests.
     ///
+    #[allow(dead_code)]
     pub fn current_shortcut_index(&self) -> &usize {
         &self.current_shortcut_index
     }
-    
+
     /// Initialize shortcuts list state when shortcuts change.
     ///
     fn update_shortcuts_list_state(&mut self) {
@@ -317,14 +331,17 @@ impl State {
     pub fn select_current_shortcut_index(&mut self) -> &mut Self {
         self.view_stack.clear();
         let all_shortcuts = self.get_all_shortcuts();
-        let selected_index = self.shortcuts_list_state.selected().unwrap_or(self.current_shortcut_index);
-        
+        let selected_index = self
+            .shortcuts_list_state
+            .selected()
+            .unwrap_or(self.current_shortcut_index);
+
         if all_shortcuts.is_empty() || selected_index >= all_shortcuts.len() {
             return self;
         }
-        
+
         let shortcut = &all_shortcuts[selected_index];
-        
+
         // Check if it's a static shortcut (these are now at the end after starred projects)
         match shortcut.as_str() {
             "My Tasks" => {
@@ -390,6 +407,10 @@ impl State {
 
     /// Return the current top list item.
     ///
+    /// Return the current top list index.
+    /// Used in tests.
+    ///
+    #[allow(dead_code)]
     pub fn current_top_list_index(&self) -> &usize {
         &self.current_top_list_index
     }
@@ -453,14 +474,16 @@ impl State {
         // Update starred project names when projects load
         for project in &self.projects {
             if self.starred_projects.contains(&project.gid) {
-                self.starred_project_names.insert(project.gid.to_owned(), project.name.to_owned());
+                self.starred_project_names
+                    .insert(project.gid.to_owned(), project.name.to_owned());
             }
         }
         // Update shortcuts list state when projects load (so starred projects appear)
         self.update_shortcuts_list_state();
         self.update_search_filters();
         if !self.projects.is_empty() && self.current_top_list_index < self.projects.len() {
-            self.projects_list_state.select(Some(self.current_top_list_index));
+            self.projects_list_state
+                .select(Some(self.current_top_list_index));
         } else if !self.projects.is_empty() {
             self.current_top_list_index = 0;
             self.projects_list_state.select(Some(0));
@@ -487,7 +510,7 @@ impl State {
     pub fn get_tasks_list_state(&mut self) -> &mut ListState {
         &mut self.tasks_list_state
     }
-    
+
     /// Get shortcuts list state.
     ///
     pub fn get_shortcuts_list_state(&mut self) -> &mut ListState {
@@ -496,6 +519,7 @@ impl State {
 
     /// Return the current task index.
     ///
+    #[allow(dead_code)]
     pub fn current_task_index(&self) -> Option<usize> {
         self.tasks_list_state.selected()
     }
@@ -595,7 +619,7 @@ impl State {
                 None
             }
         };
-        
+
         if let Some((gid, name)) = project_info {
             if self.starred_projects.contains(&gid) {
                 self.starred_projects.remove(&gid);
@@ -613,17 +637,17 @@ impl State {
         }
         self
     }
-    
+
     /// Unstar the currently selected shortcut (only works for starred projects, not base shortcuts).
     ///
     pub fn unstar_current_shortcut(&mut self) -> &mut Self {
         let all_shortcuts = self.get_all_shortcuts();
         let selected_index = self.shortcuts_list_state.selected();
-        
+
         if let Some(index) = selected_index {
             if index < all_shortcuts.len() {
                 let shortcut_name = &all_shortcuts[index];
-                
+
                 // Check if it's a base shortcut - these cannot be removed
                 match shortcut_name.as_str() {
                     "My Tasks" | "Recently Modified" | "Recently Completed" => {
@@ -633,11 +657,12 @@ impl State {
                     _ => {
                         // It's a starred project - find it and unstar it
                         // First find the GID, then remove it (to avoid borrowing conflicts)
-                        let gid_to_remove = self.starred_project_names
+                        let gid_to_remove = self
+                            .starred_project_names
                             .iter()
                             .find(|(_, name)| name.as_str() == shortcut_name.as_str())
                             .map(|(gid, _)| gid.clone());
-                        
+
                         if let Some(gid) = gid_to_remove {
                             self.starred_projects.remove(&gid);
                             self.starred_project_names.remove(&gid);
@@ -663,6 +688,7 @@ impl State {
 
     /// Get all starred projects.
     ///
+    #[allow(dead_code)]
     pub fn get_starred_projects(&self) -> Vec<&Project> {
         self.projects
             .iter()
@@ -675,7 +701,7 @@ impl State {
     pub fn get_all_shortcuts(&self) -> Vec<String> {
         // Get starred project names - prioritize stored names, then loaded projects
         let mut starred: Vec<String> = Vec::new();
-        
+
         for gid in &self.starred_projects {
             // Try to get name from stored names first (most reliable)
             if let Some(name) = self.starred_project_names.get(gid) {
@@ -687,15 +713,15 @@ impl State {
                 }
             }
         }
-        
+
         starred.sort(); // Sort for consistent ordering
-        
+
         // Put starred projects first, then base shortcuts
         let mut shortcuts = starred;
         shortcuts.extend(base_shortcuts());
         shortcuts
     }
-    
+
     /// Get all shortcuts and update list state.
     ///
     pub fn get_all_shortcuts_with_update(&mut self) -> Vec<String> {
@@ -723,30 +749,28 @@ impl State {
         if *self.current_focus() == Focus::Menu && *self.current_menu() != Menu::TopList {
             self.current_menu = Menu::TopList;
         }
-        
+
         // Only allow search in Projects list (TopList menu) or ProjectTasks view
         let can_search = match self.current_focus() {
-            Focus::Menu => {
-                *self.current_menu() == Menu::TopList
-            }
+            Focus::Menu => *self.current_menu() == Menu::TopList,
             Focus::View => {
                 matches!(self.current_view(), View::ProjectTasks)
             }
         };
-        
+
         if can_search {
             let new_target = match self.current_focus() {
                 Focus::Menu => SearchTarget::Projects,
                 Focus::View => SearchTarget::Tasks,
             };
-            
+
             // If switching targets, clear the query
             if self.search_target != Some(new_target.clone()) {
                 self.search_query.clear();
             }
             // If query is empty, we're starting fresh
             // If query is not empty and same target, we're re-entering to edit
-            
+
             self.search_mode = true;
             self.search_target = Some(new_target);
             // Initialize filtered lists if needed
@@ -767,7 +791,7 @@ impl State {
         self.search_mode = false;
         // Don't clear search_query or search_target - keep filters active
         // Don't repopulate filtered lists - keep filtered results
-        
+
         // Ensure selections are valid for the filtered lists
         if let Some(target) = &self.search_target {
             match target {
@@ -793,21 +817,22 @@ impl State {
                 }
             }
         }
-        
+
         self
     }
-    
+
     /// Clear search completely (clears query and filters).
     ///
+    #[allow(dead_code)]
     pub fn clear_search(&mut self) -> &mut Self {
         self.search_mode = false;
         self.search_query.clear();
         self.search_target = None;
-        
+
         // Repopulate filtered lists with full lists
         self.filtered_projects = self.projects.clone();
         self.filtered_tasks = self.tasks.clone();
-        
+
         // Reset selections to valid indices in the full lists
         if !self.projects.is_empty() {
             let current = self.projects_list_state.selected().unwrap_or(0);
@@ -817,7 +842,7 @@ impl State {
                 self.projects_list_state.select(Some(current));
             }
         }
-        
+
         if !self.tasks.is_empty() {
             let current = self.tasks_list_state.selected().unwrap_or(0);
             if current >= self.tasks.len() {
@@ -826,7 +851,7 @@ impl State {
                 self.tasks_list_state.select(Some(current));
             }
         }
-        
+
         self
     }
 
@@ -867,7 +892,7 @@ impl State {
             }
         } else {
             let query_lower = self.search_query.to_lowercase();
-            
+
             // Only filter the target list
             if let Some(target) = &self.search_target {
                 match target {
@@ -894,7 +919,7 @@ impl State {
                 }
             }
         }
-        
+
         // Reset selection to first item if current selection is out of bounds
         if let Some(target) = &self.search_target {
             match target {
@@ -942,10 +967,95 @@ impl State {
 
     /// Get filtered projects (or all if not searching).
     ///
+    /// Enter debug mode for navigating and copying logs.
+    ///
+    pub fn enter_debug_mode(&mut self) -> &mut Self {
+        self.debug_mode = true;
+        // Set debug_index to the most recent log (last in the list)
+        if !self.debug_entries.is_empty() {
+            self.debug_index = self.debug_entries.len() - 1;
+        } else {
+            self.debug_index = 0;
+        }
+        self
+    }
+
+    /// Exit debug mode.
+    ///
+    pub fn exit_debug_mode(&mut self) -> &mut Self {
+        self.debug_mode = false;
+        self
+    }
+
+    /// Check if in debug mode.
+    ///
+    pub fn is_debug_mode(&self) -> bool {
+        self.debug_mode
+    }
+
+    /// Get current debug index.
+    ///
+    pub fn get_debug_index(&self) -> usize {
+        self.debug_index
+    }
+
+    /// Navigate to next log entry.
+    ///
+    pub fn next_debug(&mut self) -> &mut Self {
+        if !self.debug_entries.is_empty() {
+            self.debug_index = (self.debug_index + 1) % self.debug_entries.len();
+        }
+        self
+    }
+
+    /// Navigate to previous log entry.
+    ///
+    pub fn previous_debug(&mut self) -> &mut Self {
+        if !self.debug_entries.is_empty() {
+            if self.debug_index == 0 {
+                self.debug_index = self.debug_entries.len() - 1;
+            } else {
+                self.debug_index -= 1;
+            }
+        }
+        self
+    }
+
+    /// Get the currently selected log entry.
+    ///
+    pub fn get_current_debug(&self) -> Option<&String> {
+        self.debug_entries.get(self.debug_index)
+    }
+
+    /// Add a log entry to the debug buffer.
+    ///
+    pub fn add_log_entry(&mut self, entry: String) {
+        self.debug_entries.push(entry);
+        // Keep only the last 1000 log entries to prevent memory issues
+        if self.debug_entries.len() > 1000 {
+            self.debug_entries.remove(0);
+            // Adjust debug_index if we removed entries before it
+            if self.debug_index > 0 {
+                self.debug_index -= 1;
+            }
+        }
+        // If in debug mode, update index to point to the newest log
+        if self.debug_mode && !self.debug_entries.is_empty() {
+            self.debug_index = self.debug_entries.len() - 1;
+        }
+    }
+
+    /// Get debug entries for rendering (read-only access).
+    ///
+    pub fn get_debug_entries(&self) -> &[String] {
+        &self.debug_entries
+    }
+
     pub fn get_filtered_projects(&self) -> &[Project] {
         // Show filtered results if we have a search query and target, even if not in search mode
-        if !self.search_query.is_empty() 
-            && matches!(self.search_target, Some(SearchTarget::Projects)) {
+        if !self.search_query.is_empty()
+            && matches!(self.search_target, Some(SearchTarget::Projects))
+        {
             &self.filtered_projects
         } else {
             &self.projects
@@ -956,8 +1066,8 @@ impl State {
     ///
     pub fn get_filtered_tasks(&self) -> &[Task] {
         // Show filtered results if we have a search query and target, even if not in search mode
-        if !self.search_query.is_empty() 
-            && matches!(self.search_target, Some(SearchTarget::Tasks)) {
+        if !self.search_query.is_empty() && matches!(self.search_target, Some(SearchTarget::Tasks))
+        {
             &self.filtered_tasks
         } else {
             &self.tasks

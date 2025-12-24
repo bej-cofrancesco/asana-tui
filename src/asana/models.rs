@@ -55,6 +55,19 @@ pub(crate) struct Wrapper<T> {
 }
 
 #[derive(Deserialize, Debug)]
+pub(crate) struct NextPage {
+    pub offset: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    path: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    uri: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
 pub(crate) struct ListWrapper<T> {
     pub data: Vec<T>,
+    #[serde(default)]
+    pub next_page: Option<NextPage>,
 }

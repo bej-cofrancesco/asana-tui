@@ -75,6 +75,9 @@ impl Handler {
                     if state.is_search_mode() {
                         debug!("Processing exit search mode event '{:?}'...", event);
                         state.exit_search_mode();
+                    } else if state.is_debug_mode() {
+                        debug!("Processing exit debug mode (Esc) event '{:?}'...", event);
+                        state.exit_debug_mode();
                     } else if *state.current_focus() == Focus::View {
                         debug!("Processing view cancel terminal event '{:?}'...", event);
                         state.focus_menu();
@@ -95,13 +98,16 @@ impl Handler {
                             Focus::View => {}
                         }
                     }
-                },
+                }
                 KeyEvent {
                     code: KeyCode::Char('l'),
                     modifiers: KeyModifiers::NONE,
                 } => {
                     if state.is_search_mode() {
                         state.add_search_char('l');
+                    } else if state.is_debug_mode() {
+                        debug!("Processing next debug event '{:?}'...", event);
+                        state.next_debug();
                     } else {
                         match state.current_focus() {
                             Focus::Menu => {
@@ -111,13 +117,16 @@ impl Handler {
                             Focus::View => {}
                         }
                     }
-                },
+                }
                 KeyEvent {
                     code: KeyCode::Char('k'),
                     modifiers: KeyModifiers::NONE,
                 } => {
                     if state.is_search_mode() {
                         state.add_search_char('k');
+                    } else if state.is_debug_mode() {
+                        debug!("Processing previous debug event '{:?}'...", event);
+                        state.previous_debug();
                     } else {
                         match state.current_focus() {
                             Focus::Menu => {
@@ -138,13 +147,16 @@ impl Handler {
                             }
                         }
                     }
-                },
+                }
                 KeyEvent {
                     code: KeyCode::Char('j'),
                     modifiers: KeyModifiers::NONE,
                 } => {
                     if state.is_search_mode() {
                         state.add_search_char('j');
+                    } else if state.is_debug_mode() {
+                        debug!("Processing next debug event '{:?}'...", event);
+                        state.next_debug();
                     } else {
                         match state.current_focus() {
                             Focus::Menu => {
@@ -165,7 +177,7 @@ impl Handler {
                             }
                         }
                     }
-                },
+                }
                 KeyEvent {
                     code: KeyCode::Enter,
                     modifiers: KeyModifiers::NONE,
@@ -173,6 +185,9 @@ impl Handler {
                     if state.is_search_mode() {
                         debug!("Processing exit search mode (Enter) event '{:?}'...", event);
                         state.exit_search_mode();
+                    } else if state.is_debug_mode() {
+                        debug!("Processing exit debug mode (Enter) event '{:?}'...", event);
+                        state.exit_debug_mode();
                     } else {
                         match state.current_focus() {
                             Focus::Menu => {
@@ -192,7 +207,7 @@ impl Handler {
                             Focus::View => {}
                         }
                     }
-                },
+                }
                 KeyEvent {
                     code: KeyCode::Char(' '),
                     modifiers: KeyModifiers::NONE,
@@ -208,7 +223,7 @@ impl Handler {
                     } else {
                         state.add_search_char(' ');
                     }
-                },
+                }
                 KeyEvent {
                     code: KeyCode::Char('x'),
                     modifiers: KeyModifiers::NONE,
@@ -224,24 +239,32 @@ impl Handler {
                     } else {
                         state.add_search_char('x');
                     }
-                },
+                }
                 KeyEvent {
                     code: KeyCode::Char('d'),
                     modifiers: KeyModifiers::NONE,
                 } => {
-                    if !state.is_search_mode() {
+                    if state.is_search_mode() {
+                        // In search mode, add to search query
+                        state.add_search_char('d');
+                    } else if state.is_debug_mode() {
+                        debug!("Processing exit debug mode (d) event '{:?}'...", event);
+                        state.exit_debug_mode();
+                    } else {
+                        // Check if we should enter debug mode or delete task
                         match state.current_focus() {
                             Focus::View => {
                                 debug!("Processing delete task event '{:?}'...", event);
                                 state.delete_selected_task();
                             }
-                            _ => {}
+                            _ => {
+                                // Enter debug mode when not in View focus
+                                debug!("Processing enter debug mode (d) event '{:?}'...", event);
+                                state.enter_debug_mode();
+                            }
                         }
-                    } else {
-                        // In search mode, add to search query
-                        state.add_search_char('d');
                     }
-                },
+                }
                 KeyEvent {
                     code: KeyCode::Char('s'),
                     modifiers: KeyModifiers::NONE,
@@ -267,7 +290,7 @@ impl Handler {
                             _ => {}
                         }
                     }
-                },
+                }
                 KeyEvent {
                     code: KeyCode::Char('/'),
                     modifiers: KeyModifiers::NONE,
@@ -275,11 +298,33 @@ impl Handler {
                     if state.is_search_mode() {
                         debug!("Processing exit search mode (/) event '{:?}'...", event);
                         state.exit_search_mode();
+                    } else if state.is_debug_mode() {
+                        debug!("Processing exit debug mode (/) event '{:?}'...", event);
+                        state.exit_debug_mode();
                     } else {
+                        // Check if we should enter search mode or log mode
+                        // If focus is on logs area, enter log mode, otherwise search mode
+                        // For now, we'll use a different key for log mode - let's use 'l' when not in search
+                        // Actually, let's make '/' toggle log mode when not in a searchable area
                         debug!("Processing enter search mode event '{:?}'...", event);
                         state.enter_search_mode();
                     }
-                },
+                }
+                KeyEvent {
+                    code: KeyCode::Char('y'),
+                    modifiers: KeyModifiers::NONE,
+                } => {
+                    if state.is_debug_mode() {
+                        debug!("Processing copy debug log event '{:?}'...", event);
+                        if let Some(debug_entry) = state.get_current_debug() {
+                            // Copy to clipboard - for now just log that it was copied
+                            // Removed eprintln to avoid flooding stderr when Y is pressed multiple times
+                            info!("Debug log entry copied: {}", debug_entry);
+                        }
+                    } else if !state.is_search_mode() {
+                        debug!("Skipping 'y' key when not in debug mode");
+                    }
+                }
                 KeyEvent {
                     code: KeyCode::Backspace,
                     modifiers: KeyModifiers::NONE,
@@ -288,7 +333,7 @@ impl Handler {
                         debug!("Processing remove search character event '{:?}'...", event);
                         state.remove_search_char();
                     }
-                },
+                }
                 KeyEvent {
                     code: KeyCode::Char(c),
                     modifiers: KeyModifiers::NONE,
@@ -299,7 +344,7 @@ impl Handler {
                     } else {
                         debug!("Skipping processing of terminal event '{:?}'...", event);
                     }
-                },
+                }
                 _ => {
                     if !state.is_search_mode() {
                         debug!("Skipping processing of terminal event '{:?}'...", event);

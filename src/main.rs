@@ -2,6 +2,7 @@ mod app;
 mod asana;
 mod config;
 mod events;
+mod logger;
 mod state;
 mod ui;
 
