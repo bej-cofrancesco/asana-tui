@@ -316,10 +316,10 @@ impl Handler {
                 } => {
                     if state.is_debug_mode() {
                         debug!("Processing copy debug log event '{:?}'...", event);
-                        if let Some(debug_entry) = state.get_current_debug() {
+                        if let Some(_) = state.get_current_debug() {
                             // Copy to clipboard - for now just log that it was copied
                             // Removed eprintln to avoid flooding stderr when Y is pressed multiple times
-                            info!("Debug log entry copied: {}", debug_entry);
+                            info!("COPIED TO CLIPBOARD");
                         }
                     } else if !state.is_search_mode() {
                         debug!("Skipping 'y' key when not in debug mode");

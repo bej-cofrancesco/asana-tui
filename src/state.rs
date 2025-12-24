@@ -1039,8 +1039,9 @@ impl State {
                 self.debug_index -= 1;
             }
         }
-        // If in debug mode, update index to point to the newest log
-        if self.debug_mode && !self.debug_entries.is_empty() {
+        // Always update index to point to the newest log so the list auto-scrolls
+        // This ensures new logs are visible at the bottom
+        if !self.debug_entries.is_empty() {
             self.debug_index = self.debug_entries.len() - 1;
         }
     }

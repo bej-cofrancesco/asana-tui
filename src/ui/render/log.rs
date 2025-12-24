@@ -44,8 +44,8 @@ pub fn log(frame: &mut Frame, size: Rect, state: &mut State) {
         list_state.select(Some(state.get_debug_index()));
         frame.render_stateful_widget(list, size, &mut list_state);
     } else {
-        // Normal mode: show logs from state (same as debug mode but without selection)
-        // This way logs are always available in both modes
+        // Normal mode: show logs from state with auto-scroll to bottom
+        // Use stateful widget to control scroll position
         let debug_entries = state.get_debug_entries();
         let items: Vec<ListItem> = debug_entries
             .iter()
@@ -61,6 +61,12 @@ pub fn log(frame: &mut Frame, size: Rect, state: &mut State) {
             .style(styling::normal_text_style())
             .block(block);
 
-        frame.render_widget(list, size);
+        // Use stateful widget to control scroll position
+        // Set selection to the last item (bottom) to auto-scroll
+        let mut list_state = tui::widgets::ListState::default();
+        if !debug_entries.is_empty() {
+            list_state.select(Some(debug_entries.len() - 1));
+        }
+        frame.render_stateful_widget(list, size, &mut list_state);
     }
 }
