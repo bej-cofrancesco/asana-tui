@@ -13,6 +13,7 @@ license = "MIT"
 anyhow = "1.0.47"
 chrono = "0.4.19"
 clap = "2.33.3"
+clipboard = "0.5"
 crossterm = "0.20"
 dirs = "4.0.0"
 fake = { version = "2.4.3", features = ["derive", "uuid"] }

@@ -1,5 +1,6 @@
 use crate::state::{Focus, Menu, State};
 use anyhow::Result;
+use clipboard::{ClipboardContext, ClipboardProvider};
 use crossterm::{
     event,
     event::{Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers},
@@ -316,10 +317,21 @@ impl Handler {
                 } => {
                     if state.is_debug_mode() {
                         debug!("Processing copy debug log event '{:?}'...", event);
-                        if let Some(_) = state.get_current_debug() {
-                            // Copy to clipboard - for now just log that it was copied
-                            // Removed eprintln to avoid flooding stderr when Y is pressed multiple times
-                            info!("COPIED TO CLIPBOARD");
+                        if let Some(debug_entry) = state.get_current_debug() {
+                            // Copy to clipboard
+                            match ClipboardContext::new() {
+                                Ok(mut ctx) => match ctx.set_contents(debug_entry.to_string()) {
+                                    Ok(_) => {
+                                        info!("Debug log entry copied to clipboard");
+                                    }
+                                    Err(e) => {
+                                        warn!("Failed to copy to clipboard: {}", e);
+                                    }
+                                },
+                                Err(e) => {
+                                    warn!("Failed to initialize clipboard: {}", e);
+                                }
+                            }
                         }
                     } else if !state.is_search_mode() {
                         debug!("Skipping 'y' key when not in debug mode");
