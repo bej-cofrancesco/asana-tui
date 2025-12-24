@@ -77,11 +77,8 @@ impl Config {
             self.starred_projects = data.starred_projects;
             self.starred_project_names = data.starred_project_names;
         }
-        // Otherwise authorize with user and create file
-        else {
-            self.access_token = Some(Config::authorize_with_user()?);
-            self.create_file()?;
-        }
+        // Otherwise, leave access_token as None - will be handled in TUI onboarding
+        // Don't prompt via stdin, let the TUI handle it
 
         Ok(())
     }
@@ -90,15 +87,29 @@ impl Config {
     /// returning any unrecoverable errors.
     ///
     fn create_file(&self) -> Result<()> {
+        let file_path = self.file_path.as_ref().ok_or(anyhow!("No file path set"))?;
+        let access_token = self
+            .access_token
+            .as_ref()
+            .ok_or(anyhow!("No access token set"))?;
+
         let data = FileSpec {
-            access_token: self.access_token.clone().unwrap(),
+            access_token: access_token.clone(),
             starred_projects: self.starred_projects.clone(),
             starred_project_names: self.starred_project_names.clone(),
         };
         let content = serde_yaml::to_string(&data)?;
-        let file_path = self.file_path.as_ref().unwrap();
+
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = file_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
         let mut file = fs::File::create(file_path)?;
         write!(file, "{}", content)?;
+        file.flush()?; // Ensure data is written to disk
         Ok(())
     }
 
@@ -109,7 +120,10 @@ impl Config {
             return Err(anyhow!("No file path set"));
         }
         let data = FileSpec {
-            access_token: self.access_token.clone().ok_or(anyhow!("No access token"))?,
+            access_token: self
+                .access_token
+                .clone()
+                .ok_or(anyhow!("No access token"))?,
             starred_projects: self.starred_projects.clone(),
             starred_project_names: self.starred_project_names.clone(),
         };
@@ -117,6 +131,32 @@ impl Config {
         let file_path = self.file_path.as_ref().unwrap();
         let mut file = fs::File::create(file_path)?;
         write!(file, "{}", content)?;
+        Ok(())
+    }
+
+    /// Save access token to config file.
+    ///
+    pub fn save_token(&mut self, token: String) -> Result<()> {
+        self.access_token = Some(token.clone());
+        // Ensure file path is set
+        if self.file_path.is_none() {
+            let dir_path = Config::default_path()?;
+            if !dir_path.exists() {
+                fs::create_dir_all(&dir_path)?;
+            }
+            self.file_path = Some(dir_path.join(Path::new(FILE_NAME)));
+        }
+
+        // Ensure directory exists (in case it was deleted)
+        if let Some(file_path) = &self.file_path {
+            if let Some(parent) = file_path.parent() {
+                if !parent.exists() {
+                    fs::create_dir_all(parent)?;
+                }
+            }
+        }
+
+        self.create_file()?;
         Ok(())
     }
 

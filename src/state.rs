@@ -123,6 +123,8 @@ pub struct State {
     comment_input_mode: bool,            // Whether in comment input mode
     comment_input_text: String,          // Current comment text being typed
     comments_scroll_offset: usize,       // Scroll offset for comments list
+    details_scroll_offset: usize,        // Scroll offset for details panel
+    notes_scroll_offset: usize,          // Scroll offset for notes panel
     current_task_panel: TaskDetailPanel, // Current panel in task detail view
     // Form input fields
     form_name: String,
@@ -134,6 +136,9 @@ pub struct State {
     // Dropdown selection indices
     assignee_dropdown_index: usize,
     section_dropdown_index: usize,
+    access_token_input: String, // Input field for welcome screen
+    has_access_token: bool,     // Whether access token exists (user is logged in)
+    auth_error: Option<String>, // Error message if authentication fails
 }
 
 /// Specifies which panel is being searched.
@@ -200,6 +205,8 @@ impl Default for State {
             comment_input_mode: false,
             comment_input_text: String::new(),
             comments_scroll_offset: 0,
+            details_scroll_offset: 0,
+            notes_scroll_offset: 0,
             current_task_panel: TaskDetailPanel::Details,
             form_name: String::new(),
             form_notes: String::new(),
@@ -209,6 +216,9 @@ impl Default for State {
             form_section: None,
             assignee_dropdown_index: 0,
             section_dropdown_index: 0,
+            access_token_input: String::new(),
+            has_access_token: false, // Default to false, will be set when token is loaded
+            auth_error: None,        // No error initially
         }
     }
 }
@@ -219,6 +229,7 @@ impl State {
         config_save_sender: crate::app::ConfigSaveSender,
         starred_projects: Vec<String>,
         starred_project_names: HashMap<String, String>,
+        has_access_token: bool,
     ) -> Self {
         State {
             net_sender: Some(net_sender),
@@ -226,6 +237,7 @@ impl State {
             starred_projects: starred_projects.into_iter().collect(),
             starred_project_names,
             debug_entries: vec![], // Initialize empty, will be populated by logger
+            has_access_token,
             ..State::default()
         }
     }
@@ -857,32 +869,84 @@ impl State {
         self.comments_scroll_offset
     }
 
-    pub fn scroll_comments_up(&mut self) -> &mut Self {
-        if self.comments_scroll_offset > 0 {
+    pub fn scroll_comments_down(&mut self) -> &mut Self {
+        // For bottom-aligned scrolling, "down" (j key) = see newer comments = decrease index
+        // Index 0 = newest (last item), higher = older
+        let total_comments = self.task_stories.len();
+        if total_comments > 0 && self.comments_scroll_offset > 0 {
             self.comments_scroll_offset -= 1;
         }
         self
     }
 
-    pub fn scroll_comments_down(&mut self) -> &mut Self {
+    pub fn scroll_comments_up(&mut self) -> &mut Self {
+        // For bottom-aligned scrolling, "up" (k key) = see older comments = increase index
         let total_comments = self.task_stories.len();
-        if total_comments > 0 && self.comments_scroll_offset < total_comments.saturating_sub(1) {
-            self.comments_scroll_offset += 1;
+        if total_comments > 0 {
+            let max_index = total_comments.saturating_sub(1);
+            if self.comments_scroll_offset < max_index {
+                self.comments_scroll_offset += 1;
+            }
         }
         self
     }
 
     pub fn scroll_comments_to_bottom(&mut self) -> &mut Self {
-        let total_comments = self.task_stories.len();
-        if total_comments > 0 {
-            // Set scroll to last comment
-            self.comments_scroll_offset = total_comments.saturating_sub(1);
+        // For bottom alignment, index 0 means newest (last item)
+        self.comments_scroll_offset = 0;
+        self
+    }
+
+    // Details panel scrolling
+
+    pub fn get_details_scroll_offset(&self) -> usize {
+        self.details_scroll_offset
+    }
+
+    pub fn scroll_details_up(&mut self) -> &mut Self {
+        if self.details_scroll_offset > 0 {
+            self.details_scroll_offset -= 1;
         }
         self
     }
 
-    pub fn reset_comments_scroll(&mut self) -> &mut Self {
-        self.comments_scroll_offset = 0;
+    pub fn scroll_details_down(&mut self) -> &mut Self {
+        // Details panel has a fixed number of properties, so we can scroll through them
+        // For now, just allow scrolling up to a reasonable limit
+        if self.details_scroll_offset < 20 {
+            self.details_scroll_offset += 1;
+        }
+        self
+    }
+
+    pub fn reset_details_scroll(&mut self) -> &mut Self {
+        self.details_scroll_offset = 0;
+        self
+    }
+
+    // Notes panel scrolling
+
+    pub fn get_notes_scroll_offset(&self) -> usize {
+        self.notes_scroll_offset
+    }
+
+    pub fn scroll_notes_up(&mut self) -> &mut Self {
+        if self.notes_scroll_offset > 0 {
+            self.notes_scroll_offset -= 1;
+        }
+        self
+    }
+
+    pub fn scroll_notes_down(&mut self) -> &mut Self {
+        // Notes can be long, allow scrolling
+        if self.notes_scroll_offset < 100 {
+            self.notes_scroll_offset += 1;
+        }
+        self
+    }
+
+    pub fn reset_notes_scroll(&mut self) -> &mut Self {
+        self.notes_scroll_offset = 0;
         self
     }
 
@@ -1095,6 +1159,51 @@ impl State {
     ///
     pub fn is_comment_input_mode(&self) -> bool {
         self.comment_input_mode
+    }
+
+    /// Get comment input text.
+    ///
+    pub fn has_access_token(&self) -> bool {
+        self.has_access_token
+    }
+
+    pub fn get_access_token_input(&self) -> &str {
+        &self.access_token_input
+    }
+
+    pub fn set_access_token(&mut self, _token: String) -> &mut Self {
+        self.has_access_token = true;
+        // Token is stored in config file by network handler
+        self
+    }
+
+    pub fn add_access_token_char(&mut self, c: char) -> &mut Self {
+        self.access_token_input.push(c);
+        self
+    }
+
+    pub fn backspace_access_token(&mut self) -> &mut Self {
+        self.access_token_input.pop();
+        self
+    }
+
+    pub fn clear_access_token_input(&mut self) -> &mut Self {
+        self.access_token_input.clear();
+        self
+    }
+
+    pub fn set_auth_error(&mut self, error: Option<String>) -> &mut Self {
+        self.auth_error = error;
+        self
+    }
+
+    pub fn get_auth_error(&self) -> Option<&String> {
+        self.auth_error.as_ref()
+    }
+
+    pub fn clear_auth_error(&mut self) -> &mut Self {
+        self.auth_error = None;
+        self
     }
 
     /// Get comment input text.

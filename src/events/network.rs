@@ -1,6 +1,6 @@
 use crate::asana::Asana;
 use crate::state::State;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use log::*;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 ///
 #[derive(Debug, Clone)]
 pub enum Event {
+    SetAccessToken { token: String },
     Me,
     ProjectTasks,
     MyTasks,
@@ -72,6 +73,69 @@ impl<'a> Handler<'a> {
     pub async fn handle(&mut self, event: Event) -> Result<()> {
         debug!("Processing network event '{:?}'...", event);
         match event {
+            Event::SetAccessToken { token } => {
+                // Clear any previous error
+                {
+                    let mut state = self.state.lock().await;
+                    state.clear_auth_error();
+                }
+
+                // Try to save token and authenticate
+                let result = async {
+                    // Save token to config file - use the same pattern as original load()
+                    // 1. Create new config and load it to set up file path
+                    // 2. Save the token which will create the file
+                    let mut config = crate::config::Config::new();
+                    
+                    // Load config first to set up the file path (creates directory if needed)
+                    // This is the same logic that was in the original load() method
+                    config.load(None)?;
+                    
+                    // Now save the token - this will create the file using create_file()
+                    // This matches the original pattern where after getting the token,
+                    // the file would be created immediately
+                    config.save_token(token.clone())?;
+                    
+                    info!("Access token saved to config file successfully.");
+                    
+                    // Update Asana client with new token
+                    *self.asana = crate::asana::Asana::new(&token);
+                    
+                    // Fetch user data - this may fail if token is invalid
+                    self.me().await?;
+                    
+                    // If we get here, authentication succeeded
+                    // Update state to mark as authenticated
+                    {
+                        let mut state = self.state.lock().await;
+                        state.set_access_token(token.clone());
+                        state.clear_access_token_input();
+                        state.clear_auth_error();
+                    }
+                    
+                    info!("Access token saved and user authenticated.");
+                    Ok::<(), anyhow::Error>(())
+                }.await;
+
+                // Handle errors gracefully
+                if let Err(e) = result {
+                    let error_msg = format!("Authentication failed: {}", e);
+                    error!("{}", error_msg);
+                    
+                    // Set error in state but keep has_access_token as false
+                    // This allows user to see the error and resubmit
+                    {
+                        let mut state = self.state.lock().await;
+                        state.set_auth_error(Some(error_msg));
+                        // Don't set has_access_token to true on error
+                        // Don't clear the input so user can edit and resubmit
+                    }
+                    
+                    // Return Ok so the event handler doesn't crash
+                    // The error is now stored in state and will be displayed in UI
+                    return Ok(());
+                }
+            }
             Event::Me => self.me().await?,
             Event::ProjectTasks => self.project_tasks().await?,
             Event::MyTasks => self.my_tasks().await?,
@@ -187,8 +251,12 @@ impl<'a> Handler<'a> {
         let workspace_gid;
         {
             let state = self.state.lock().await;
-            user_gid = state.get_user().unwrap().gid.to_owned();
-            workspace_gid = state.get_active_workspace().unwrap().gid.to_owned();
+            user_gid = state.get_user()
+                .ok_or(anyhow!("User not set. Please wait for authentication to complete."))?
+                .gid.to_owned();
+            workspace_gid = state.get_active_workspace()
+                .ok_or(anyhow!("No active workspace. Please wait for authentication to complete."))?
+                .gid.to_owned();
         }
         let my_tasks = self.asana.my_tasks(&user_gid, &workspace_gid).await?;
         let mut state = self.state.lock().await;

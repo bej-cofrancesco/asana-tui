@@ -1,4 +1,4 @@
-use super::welcome::{BANNER, CONTENT};
+use super::welcome;
 use super::{create_task, edit_task, kanban, task_detail, Frame};
 use crate::state::{Focus, State, View};
 use crate::ui::widgets::styling;
@@ -57,24 +57,7 @@ pub fn main(frame: &mut Frame, size: Rect, state: &mut State) {
 }
 
 fn welcome(frame: &mut Frame, size: Rect, state: &mut State) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(6), Constraint::Length(94)].as_ref())
-        .margin(2)
-        .split(size);
-
-    let block = view_block("Welcome", state);
-    frame.render_widget(block, size);
-
-    let mut banner = Text::from(BANNER);
-    banner.patch_style(styling::banner_style());
-    let banner_widget = Paragraph::new(banner);
-    frame.render_widget(banner_widget, rows[0]);
-
-    let mut content = Text::from(CONTENT);
-    content.patch_style(styling::normal_text_style());
-    let content_widget = Paragraph::new(content);
-    frame.render_widget(content_widget, rows[1]);
+    welcome::render_welcome(frame, size, state);
 }
 
 fn my_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
@@ -193,9 +176,17 @@ fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
     let dialog_width = 60.min(size.width.saturating_sub(4));
     let dialog_height = 7;
     
-    // Center horizontally and vertically
-    let x = (size.width.saturating_sub(dialog_width)) / 2;
-    let y = (size.height.saturating_sub(dialog_height)) / 2;
+    // Center horizontally and vertically - use proper centering formula
+    let x = if size.width > dialog_width {
+        (size.width - dialog_width) / 2
+    } else {
+        0
+    };
+    let y = if size.height > dialog_height {
+        (size.height - dialog_height) / 2
+    } else {
+        0
+    };
 
     let dialog_rect = Rect {
         x,

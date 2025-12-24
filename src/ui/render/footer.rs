@@ -20,7 +20,7 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
     } else if *state.current_focus() == crate::state::Focus::View {
         match state.current_view() {
             crate::state::View::TaskDetail => {
-                " j/k: scroll comments, e: edit, d: delete, c: comment, Esc: back, q: quit"
+                " h/l: switch panel, j/k: scroll, e: edit, d: delete, c: comment, Esc: back, q: quit"
             }
             crate::state::View::CreateTask | crate::state::View::EditTask => {
                 " Tab/Shift+Tab: navigate fields, Enter: save, Esc: cancel"
@@ -80,10 +80,21 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
     {
         Spans::from(vec![
             Span::styled(
-                "TASK:",
+                "TASKS:",
                 Style::default()
                     .fg(Color::White)
                     .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(controls_text, Style::default().fg(YELLOW)),
+        ])
+    } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
+        Spans::from(vec![
+            Span::styled(
+                "TASK:",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Magenta)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(controls_text, Style::default().fg(YELLOW)),

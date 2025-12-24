@@ -1,5 +1,5 @@
 use super::Frame;
-use crate::state::State;
+use crate::state::{State, TaskDetailPanel};
 use crate::ui::widgets::styling;
 use chrono::DateTime;
 use tui::{
@@ -17,14 +17,37 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &State) {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3), // Header
-                Constraint::Min(10),   // Main content (increased min height)
+                Constraint::Min(10),   // Main content
             ])
             .split(size);
 
-        // Header with task name
+        // Header with task name and panel indicators
+        let current_panel = state.get_current_task_panel();
+        let panel_indicators = format!(
+            "{} {} {}",
+            if current_panel == TaskDetailPanel::Details {
+                "[Details]"
+            } else {
+                " Details "
+            },
+            if current_panel == TaskDetailPanel::Comments {
+                "[Comments]"
+            } else {
+                " Comments "
+            },
+            if current_panel == TaskDetailPanel::Notes {
+                "[Notes]"
+            } else {
+                " Notes "
+            },
+        );
+
         let header = Block::default()
             .borders(Borders::ALL)
-            .title("Task Details")
+            .title(format!(
+                "Task Details - h/l: switch panel | {}",
+                panel_indicators
+            ))
             .border_style(styling::active_block_border_style());
 
         let name_text = Spans::from(vec![Span::styled(
@@ -38,34 +61,18 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &State) {
             .alignment(Alignment::Left);
         frame.render_widget(name_para, chunks[0]);
 
-        // Main content area - split into top (properties + comments) and bottom (notes)
-        let main_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(60), // Properties and comments
-                Constraint::Percentage(40), // Notes
-            ])
-            .split(chunks[1]);
-        
-        // Top section: properties and comments side by side
-        let top_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(main_chunks[0]);
-
-        // Left column: Task properties
-        render_task_properties(frame, top_chunks[0], task, state);
-
-        // Right column: Comments
-        render_comments(frame, top_chunks[1], state, task);
-
-        // Notes area at bottom
-        let notes_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(5)])
-            .split(chunks[1]);
-
-        render_notes(frame, notes_chunks[1], task);
+        // Main content area - show only the active panel
+        match current_panel {
+            TaskDetailPanel::Details => {
+                render_task_properties(frame, chunks[1], task, state);
+            }
+            TaskDetailPanel::Comments => {
+                render_comments(frame, chunks[1], state, task);
+            }
+            TaskDetailPanel::Notes => {
+                render_notes(frame, chunks[1], task, state);
+            }
+        }
     } else {
         // Loading or no task selected
         let block = Block::default().borders(Borders::ALL).title("Task Details");
@@ -76,7 +83,9 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &State) {
     }
 }
 
-fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Task, _state: &State) {
+fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Task, state: &State) {
+    let is_active = state.get_current_task_panel() == TaskDetailPanel::Details;
+
     let mut lines = vec![];
 
     // Assignee
@@ -145,7 +154,14 @@ fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Ta
         Span::styled(task.num_comments.to_string(), styling::normal_text_style()),
     ]));
 
-    let block = Block::default().borders(Borders::ALL).title("Properties");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Properties")
+        .border_style(if is_active {
+            styling::active_block_border_style()
+        } else {
+            styling::normal_block_border_style()
+        });
     let text = Paragraph::new(Text::from(lines))
         .block(block)
         .wrap(Wrap { trim: true });
@@ -153,8 +169,9 @@ fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Ta
 }
 
 fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::asana::Task) {
+    let is_active = state.get_current_task_panel() == TaskDetailPanel::Comments;
     let stories = state.get_task_stories();
-    
+
     // Filter for actual comments (resource_subtype = "comment_added")
     // Ignore system activity messages
     let comments: Vec<&crate::asana::Story> = stories
@@ -168,7 +185,7 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
             }
         })
         .collect();
-    
+
     // Split into comments area and input area if in comment input mode
     let chunks = if state.is_comment_input_mode() {
         Layout::default()
@@ -182,17 +199,17 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
             .split(size)
     };
 
-    let scroll_offset = state.get_comments_scroll_offset();
-    let title = if comments.len() > 1 {
-        format!("Comments ({}) - j/k to scroll", comments.len())
-    } else {
-        format!("Comments ({})", comments.len())
-    };
+    let title = format!("Comments ({})", comments.len());
 
+    // Highlight border when active OR when in comment input mode
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
-        .border_style(styling::normal_block_border_style());
+        .border_style(if is_active || state.is_comment_input_mode() {
+            styling::active_block_border_style()
+        } else {
+            styling::normal_block_border_style()
+        });
 
     if comments.is_empty() && !state.is_comment_input_mode() {
         let text = Paragraph::new("No comments yet. Press 'c' to add a comment.")
@@ -200,10 +217,10 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
             .alignment(Alignment::Center);
         frame.render_widget(text, chunks[0]);
     } else {
+        // Create nice multi-line comment items with proper formatting
         let items: Vec<ListItem> = comments
             .iter()
-            .enumerate()
-            .map(|(i, story)| {
+            .map(|story| {
                 let author = story
                     .created_by
                     .as_ref()
@@ -222,34 +239,15 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
                     Span::styled(timestamp_str, Style::default().fg(Color::DarkGray)),
                 ]);
 
-                // Wrap long comment text
-                let text_lines: Vec<Spans> = story.text
+                // Split comment text into lines and create Spans for each
+                let text_lines: Vec<Spans> = story
+                    .text
                     .lines()
-                    .flat_map(|line| {
-                        // Simple word wrapping
-                        let max_width = (size.width.saturating_sub(4)) as usize;
-                        if line.len() <= max_width {
-                            vec![Spans::from(Span::styled(line.to_string(), styling::normal_text_style()))]
-                        } else {
-                            let mut result = vec![];
-                            let mut current_line = String::new();
-                            for word in line.split_whitespace() {
-                                if current_line.len() + word.len() + 1 > max_width {
-                                    if !current_line.is_empty() {
-                                        result.push(Spans::from(Span::styled(current_line.clone(), styling::normal_text_style())));
-                                        current_line.clear();
-                                    }
-                                }
-                                if !current_line.is_empty() {
-                                    current_line.push(' ');
-                                }
-                                current_line.push_str(word);
-                            }
-                            if !current_line.is_empty() {
-                                result.push(Spans::from(Span::styled(current_line, styling::normal_text_style())));
-                            }
-                            result
-                        }
+                    .map(|line| {
+                        Spans::from(Span::styled(
+                            line.to_string(),
+                            styling::normal_text_style(),
+                        ))
                     })
                     .collect();
 
@@ -261,14 +259,24 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
             })
             .collect();
 
-        // Calculate visible range based on scroll offset
-        let list = List::new(items)
+        // Use ListState for proper item-by-item navigation
+        // For bottom-aligned list: index 0 = newest (last item), higher = older
+        let selected_index = state.get_comments_scroll_offset();
+        let total_items = items.len();
+        
+        // Create list with all items - tui-rs List widget handles scrolling automatically
+        let list = List::new(items.clone())
             .block(block)
             .style(styling::normal_text_style());
+            // No highlight_style - make selection subtle (just cursor, no color)
         
-        // Create a list state for scrolling
+        // Create a list state with selected item (from bottom: 0 = last item)
         let mut list_state = tui::widgets::ListState::default();
-        list_state.select(Some(scroll_offset.min(comments.len().saturating_sub(1))));
+        if !items.is_empty() {
+            // Convert from bottom index to top index: last item = index 0, second last = index 1, etc.
+            let top_index = total_items.saturating_sub(1).saturating_sub(selected_index);
+            list_state.select(Some(top_index.min(total_items.saturating_sub(1))));
+        }
         
         frame.render_stateful_widget(list, chunks[0], &mut list_state);
     }
@@ -286,8 +294,17 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
     }
 }
 
-fn render_notes(frame: &mut Frame, size: Rect, task: &crate::asana::Task) {
-    let block = Block::default().borders(Borders::ALL).title("Notes");
+fn render_notes(frame: &mut Frame, size: Rect, task: &crate::asana::Task, state: &State) {
+    let is_active = state.get_current_task_panel() == TaskDetailPanel::Notes;
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Notes")
+        .border_style(if is_active {
+            styling::active_block_border_style()
+        } else {
+            styling::normal_block_border_style()
+        });
 
     let notes_text = task.notes.as_deref().unwrap_or("No notes");
     let text = Paragraph::new(notes_text)

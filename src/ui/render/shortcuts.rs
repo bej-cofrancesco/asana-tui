@@ -49,7 +49,7 @@ pub fn shortcuts(frame: &mut Frame, size: Rect, state: &mut State) {
         .iter()
         .map(|s| ListItem::new(s.to_owned()))
         .collect();
-    
+
     let list = List::new(items)
         .style(styling::normal_text_style())
         .highlight_style(list_item_style)

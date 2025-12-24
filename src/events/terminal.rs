@@ -71,6 +71,30 @@ impl Handler {
                 } if state.is_comment_input_mode() => {
                     state.add_comment_char(c);
                 }
+                // Handle token input in onboarding - all character keys go to token input
+                // Clear error when user starts typing
+                KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers: KeyModifiers::NONE,
+                } if matches!(state.current_view(), crate::state::View::Welcome) 
+                    && !state.has_access_token() => {
+                    // Clear error when user starts typing
+                    if state.get_auth_error().is_some() {
+                        state.clear_auth_error();
+                    }
+                    state.add_access_token_char(c);
+                }
+                KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers: KeyModifiers::SHIFT,
+                } if matches!(state.current_view(), crate::state::View::Welcome) 
+                    && !state.has_access_token() => {
+                    // Clear error when user starts typing
+                    if state.get_auth_error().is_some() {
+                        state.clear_auth_error();
+                    }
+                    state.add_access_token_char(c);
+                }
                 // Handle assignee search input - all character keys go to search
                 KeyEvent {
                     code: KeyCode::Char(c),
@@ -150,6 +174,10 @@ impl Handler {
                 } => {
                     if state.is_search_mode() {
                         state.add_search_char('h');
+                    } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                        // Navigate to previous panel in task detail view
+                        debug!("Processing previous task panel event '{:?}'...", event);
+                        state.previous_task_panel();
                     } else if matches!(state.current_view(), crate::state::View::KanbanBoard) 
                         || (matches!(state.current_view(), crate::state::View::ProjectTasks) 
                             && state.get_view_mode() == crate::state::ViewMode::Kanban) {
@@ -172,9 +200,10 @@ impl Handler {
                 } => {
                     if state.is_search_mode() {
                         state.add_search_char('l');
-                    } else if state.is_debug_mode() {
-                        debug!("Processing next debug event '{:?}'...", event);
-                        state.next_debug();
+                    } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                        // Navigate to next panel in task detail view
+                        debug!("Processing next task panel event '{:?}'...", event);
+                        state.next_task_panel();
                     } else if matches!(state.current_view(), crate::state::View::KanbanBoard) 
                         || (matches!(state.current_view(), crate::state::View::ProjectTasks) 
                             && state.get_view_mode() == crate::state::ViewMode::Kanban) {
@@ -204,9 +233,22 @@ impl Handler {
                         // In comment input mode, 'k' should be typed, not scroll
                         state.add_comment_char('k');
                     } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
-                        // Scroll comments up in task detail view
-                        debug!("Processing scroll comments up event '{:?}'...", event);
-                        state.scroll_comments_up();
+                        // Scroll based on active panel
+                        let panel = state.get_current_task_panel();
+                        match panel {
+                            crate::state::TaskDetailPanel::Details => {
+                                debug!("Processing scroll details up event '{:?}'...", event);
+                                state.scroll_details_up();
+                            }
+                            crate::state::TaskDetailPanel::Comments => {
+                                debug!("Processing scroll comments up event '{:?}'...", event);
+                                state.scroll_comments_up();
+                            }
+                            crate::state::TaskDetailPanel::Notes => {
+                                debug!("Processing scroll notes up event '{:?}'...", event);
+                                state.scroll_notes_up();
+                            }
+                        }
                     } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
                         // Handle dropdown navigation in forms
                         match state.get_edit_form_state() {
@@ -260,9 +302,22 @@ impl Handler {
                         // In comment input mode, 'j' should be typed, not scroll
                         state.add_comment_char('j');
                     } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
-                        // Scroll comments down in task detail view
-                        debug!("Processing scroll comments down event '{:?}'...", event);
-                        state.scroll_comments_down();
+                        // Scroll based on active panel
+                        let panel = state.get_current_task_panel();
+                        match panel {
+                            crate::state::TaskDetailPanel::Details => {
+                                debug!("Processing scroll details down event '{:?}'...", event);
+                                state.scroll_details_down();
+                            }
+                            crate::state::TaskDetailPanel::Comments => {
+                                debug!("Processing scroll comments down event '{:?}'...", event);
+                                state.scroll_comments_down();
+                            }
+                            crate::state::TaskDetailPanel::Notes => {
+                                debug!("Processing scroll notes down event '{:?}'...", event);
+                                state.scroll_notes_down();
+                            }
+                        }
                     } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
                         // Handle dropdown navigation in forms
                         match state.get_edit_form_state() {
@@ -307,7 +362,14 @@ impl Handler {
                     code: KeyCode::Enter,
                     modifiers: KeyModifiers::NONE,
                 } => {
-                    if state.is_search_mode() {
+                    // Handle onboarding screen - submit access token
+                    if matches!(state.current_view(), crate::state::View::Welcome) && !state.has_access_token() {
+                        let token = state.get_access_token_input().to_string();
+                        if !token.trim().is_empty() {
+                            debug!("Submitting access token from onboarding screen...");
+                            state.dispatch(crate::events::network::Event::SetAccessToken { token });
+                        }
+                    } else if state.is_search_mode() {
                         debug!("Processing exit search mode (Enter) event '{:?}'...", event);
                         state.exit_search_mode();
                     } else if state.is_debug_mode() {
@@ -714,6 +776,14 @@ impl Handler {
                     } else if state.is_comment_input_mode() {
                         debug!("Processing remove comment character event '{:?}'...", event);
                         state.remove_comment_char();
+                    } else if matches!(state.current_view(), crate::state::View::Welcome) 
+                        && !state.has_access_token() {
+                        debug!("Processing remove token character event '{:?}'...", event);
+                        // Clear error when user edits
+                        if state.get_auth_error().is_some() {
+                            state.clear_auth_error();
+                        }
+                        state.backspace_access_token();
                     } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
                         // Handle form backspace
                         match state.get_edit_form_state() {

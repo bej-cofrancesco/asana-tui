@@ -27,7 +27,7 @@ type ConfigSaveReceiver = std::sync::mpsc::Receiver<()>;
 /// Oversees event processing, state management, and terminal output.
 ///
 pub struct App {
-    access_token: String,
+    access_token: Option<String>, // Make optional to handle onboarding
     state: Arc<Mutex<State>>,
     config: Config,
 }
@@ -42,16 +42,15 @@ impl App {
         let (config_save_tx, config_save_rx) = std::sync::mpsc::channel::<()>();
         let starred_projects = config.starred_projects.clone();
         let starred_project_names = config.starred_project_names.clone();
-        let access_token = config
-            .access_token
-            .clone()
-            .ok_or(anyhow!("Failed to retrieve access token"))?;
+        let has_access_token = config.access_token.is_some();
+        let access_token = config.access_token.clone();
 
         let state = Arc::new(Mutex::new(State::new(
             tx.clone(),
             config_save_tx.clone(),
             starred_projects,
             starred_project_names,
+            has_access_token,
         )));
 
         // Set up log capture to state BEFORE initializing tui_logger
@@ -112,7 +111,12 @@ impl App {
             state,
             config,
         };
-        app.start_network(rx)?;
+
+        // Always start network thread - it will handle SetAccessToken event
+        // Use actual token if available, or empty string as placeholder
+        let initial_token = app.access_token.clone().unwrap_or_default();
+        app.start_network_with_token(rx, initial_token)?;
+
         app.start_config_saver(config_save_rx);
         app.start_ui(tx).await?;
 
@@ -151,9 +155,21 @@ impl App {
     /// Start a separate thread for asynchronous state mutations.
     ///
     fn start_network(&self, net_receiver: NetworkEventReceiver) -> Result<()> {
+        let access_token = self
+            .access_token
+            .clone()
+            .ok_or(anyhow!("No access token"))?;
+        self.start_network_with_token(net_receiver, access_token)
+    }
+
+    fn start_network_with_token(
+        &self,
+        net_receiver: NetworkEventReceiver,
+        initial_token: String,
+    ) -> Result<()> {
         debug!("Creating new thread for asynchronous networking...");
         let cloned_state = Arc::clone(&self.state);
-        let access_token = self.access_token.to_owned();
+        let access_token = initial_token.to_owned();
         std::thread::spawn(move || {
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -199,7 +215,10 @@ impl App {
         let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
         terminal.hide_cursor()?;
 
-        net_sender.send(NetworkEvent::Me)?;
+        // Only send Me event if we have a token (network thread is running with valid token)
+        if self.access_token.is_some() {
+            net_sender.send(NetworkEvent::Me)?;
+        }
 
         let terminal_event_handler = TerminalEventHandler::new();
         loop {
