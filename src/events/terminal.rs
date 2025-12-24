@@ -82,13 +82,38 @@ impl Handler {
                     } else if state.has_delete_confirmation() {
                         debug!("Processing cancel delete confirmation event '{:?}'...", event);
                         state.cancel_delete_confirmation();
+                    } else if state.is_comment_input_mode() {
+                        debug!("Processing cancel comment input event '{:?}'...", event);
+                        state.exit_comment_input_mode();
                     } else if *state.current_focus() == Focus::View {
-                        debug!("Processing view cancel/refresh terminal event '{:?}'...", event);
-                        // Refetch tasks when escaping from task view
-                        if matches!(state.current_view(), crate::state::View::ProjectTasks) {
-                            state.dispatch(crate::events::network::Event::ProjectTasks);
-                        }
+                        debug!("Processing view navigation (Esc) event '{:?}'...", event);
+                        // Pop the current view to go back
+                        if let Some(popped_view) = state.pop_view() {
+                            debug!("Popped view: {:?}, remaining views: {}", popped_view, state.view_stack_len());
+                            
+                            // If we're going back from a detail/edit/create view, refresh the parent view
+                            match popped_view {
+                                crate::state::View::TaskDetail | 
+                                crate::state::View::EditTask | 
+                                crate::state::View::CreateTask | 
+                                crate::state::View::KanbanBoard => {
+                                    // Refresh the parent view (usually ProjectTasks)
+                                    if matches!(state.current_view(), crate::state::View::ProjectTasks) {
+                                        state.dispatch(crate::events::network::Event::ProjectTasks);
+                                    }
+                                }
+                                _ => {}
+                            }
+                            
+                            // If we're back at the menu, focus it
+                            if matches!(state.current_view(), crate::state::View::Welcome) {
+                                state.focus_menu();
+                            }
+                        } else {
+                            // No more views to pop, go back to menu
+                            debug!("No more views to pop, focusing menu");
                         state.focus_menu();
+                        }
                     }
                 }
                 KeyEvent {
@@ -97,6 +122,12 @@ impl Handler {
                 } => {
                     if state.is_search_mode() {
                         state.add_search_char('h');
+                    } else if matches!(state.current_view(), crate::state::View::KanbanBoard) 
+                        || (matches!(state.current_view(), crate::state::View::ProjectTasks) 
+                            && state.get_view_mode() == crate::state::ViewMode::Kanban) {
+                        // Navigate to previous kanban column
+                        debug!("Processing previous kanban column event '{:?}'...", event);
+                        state.previous_kanban_column();
                     } else {
                         match state.current_focus() {
                     Focus::Menu => {
@@ -116,6 +147,12 @@ impl Handler {
                     } else if state.is_debug_mode() {
                         debug!("Processing next debug event '{:?}'...", event);
                         state.next_debug();
+                    } else if matches!(state.current_view(), crate::state::View::KanbanBoard) 
+                        || (matches!(state.current_view(), crate::state::View::ProjectTasks) 
+                            && state.get_view_mode() == crate::state::ViewMode::Kanban) {
+                        // Navigate to next kanban column
+                        debug!("Processing next kanban column event '{:?}'...", event);
+                        state.next_kanban_column();
                     } else {
                         match state.current_focus() {
                     Focus::Menu => {
@@ -200,23 +237,139 @@ impl Handler {
                         // Confirm delete - call delete_selected_task again to actually delete
                         debug!("Processing confirm delete event '{:?}'...", event);
                         state.delete_selected_task();
-                    } else {
-                        match state.current_focus() {
-                            Focus::Menu => {
-                                debug!("Processing select menu item event '{:?}'...", event);
-                                match state.current_menu() {
-                                    Menu::Status => {
-                                        state.select_status_menu();
+                    } else if state.is_comment_input_mode() {
+                        // Submit comment
+                        let task_gid = state.get_task_detail().map(|t| t.gid.clone());
+                        if let Some(gid) = task_gid {
+                            let comment_text = state.submit_comment();
+                            if !comment_text.trim().is_empty() {
+                                state.dispatch(crate::events::network::Event::CreateStory {
+                                    task_gid: gid,
+                                    text: comment_text,
+                                });
+                            }
+                        }
+                    } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
+                        // Handle form Enter key
+                        match state.get_edit_form_state() {
+                            Some(crate::state::EditFormState::Name) => {
+                                state.set_edit_form_state(Some(crate::state::EditFormState::Notes));
+                            }
+                            Some(crate::state::EditFormState::Notes) => {
+                                state.set_edit_form_state(Some(crate::state::EditFormState::Assignee));
+                            }
+                            Some(crate::state::EditFormState::Assignee) => {
+                                // Toggle through assignees or show selection
+                                // For now, just move to next field
+                                state.set_edit_form_state(Some(crate::state::EditFormState::DueDate));
+                            }
+                            Some(crate::state::EditFormState::DueDate) => {
+                                state.set_edit_form_state(Some(crate::state::EditFormState::Section));
+                            }
+                            Some(crate::state::EditFormState::Section) | Some(crate::state::EditFormState::Tags) => {
+                                // Submit form
+                                if matches!(state.current_view(), crate::state::View::CreateTask) {
+                                    // Create task
+                                    if let Some(project) = state.get_project() {
+                                        let name = state.get_form_name().to_string();
+                                        if !name.trim().is_empty() {
+                                            state.dispatch(crate::events::network::Event::CreateTask {
+                                                project_gid: project.gid.clone(),
+                                                name,
+                                                notes: Some(state.get_form_notes().to_string()),
+                                                assignee: state.get_form_assignee().cloned(),
+                                                due_on: if state.get_form_due_on().is_empty() {
+                                                    None
+                                                } else {
+                                                    Some(state.get_form_due_on().to_string())
+                                                },
+                                                section: state.get_form_section().cloned(),
+                                            });
+                                            state.clear_form();
+                                            state.pop_view();
+                                        }
                                     }
-                                    Menu::Shortcuts => {
-                                        state.select_current_shortcut_index();
-                                    }
-                                    Menu::TopList => {
-                                        state.select_current_top_list_index();
+                                } else if matches!(state.current_view(), crate::state::View::EditTask) {
+                                    // Update task
+                                    if let Some(task) = state.get_task_detail() {
+                                        let name = state.get_form_name().to_string();
+                                        if !name.trim().is_empty() {
+                                            state.dispatch(crate::events::network::Event::UpdateTaskFields {
+                                                gid: task.gid.clone(),
+                                                name: Some(name),
+                                                notes: Some(state.get_form_notes().to_string()),
+                                                assignee: state.get_form_assignee().cloned(),
+                                                due_on: if state.get_form_due_on().is_empty() {
+                                                    None
+                                                } else {
+                                                    Some(state.get_form_due_on().to_string())
+                                                },
+                                                section: state.get_form_section().cloned(),
+                                                completed: None,
+                                            });
+                                            state.clear_form();
+                                            state.pop_view();
+                                        }
                                     }
                                 }
                             }
-                            Focus::View => {}
+                            None => {
+                                state.set_edit_form_state(Some(crate::state::EditFormState::Name));
+                            }
+                        }
+                    } else {
+                        match state.current_focus() {
+                    Focus::Menu => {
+                        debug!("Processing select menu item event '{:?}'...", event);
+                        match state.current_menu() {
+                            Menu::Status => {
+                                state.select_status_menu();
+                            }
+                            Menu::Shortcuts => {
+                                state.select_current_shortcut_index();
+                            }
+                            Menu::TopList => {
+                                state.select_current_top_list_index();
+                            }
+                        }
+                    }
+                            Focus::View => {
+                                // Enter key in task view: view task details
+                                if matches!(state.current_view(), crate::state::View::ProjectTasks) {
+                                    if state.get_view_mode() == crate::state::ViewMode::Kanban {
+                                        // Kanban view: get selected task from kanban
+                                        if let Some(task) = state.get_kanban_selected_task() {
+                                            state.dispatch(crate::events::network::Event::GetTaskDetail {
+                                                gid: task.gid.clone(),
+                                            });
+                                            state.push_view(crate::state::View::TaskDetail);
+                                            state.focus_view();
+                                        }
+                                    } else {
+                                        // List view: get selected task from list
+                                        let filtered = state.get_filtered_tasks();
+                                        if let Some(selected_index) = state.get_tasks_list_state().selected() {
+                                            if selected_index < filtered.len() {
+                                                let task = &filtered[selected_index];
+                                                state.dispatch(crate::events::network::Event::GetTaskDetail {
+                                                    gid: task.gid.clone(),
+                                                });
+                                                state.push_view(crate::state::View::TaskDetail);
+                                                state.focus_view();
+                                            }
+                                        }
+                                    }
+                                } else if matches!(state.current_view(), crate::state::View::KanbanBoard) {
+                                    // Kanban board view: view task details
+                                    if let Some(task) = state.get_kanban_selected_task() {
+                                        state.dispatch(crate::events::network::Event::GetTaskDetail {
+                                            gid: task.gid.clone(),
+                                        });
+                                        state.push_view(crate::state::View::TaskDetail);
+                                        state.focus_view();
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -266,14 +419,81 @@ impl Handler {
                         // Check if we should enter debug mode or delete task
                         match state.current_focus() {
                             Focus::View => {
-                                debug!("Processing delete task event '{:?}'...", event);
-                                state.delete_selected_task();
+                                if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                                    // Delete task from detail view
+                                    if let Some(task) = state.get_task_detail() {
+                                        state.set_delete_confirmation(task.gid.clone());
+                                    }
+                                } else {
+                                    debug!("Processing delete task event '{:?}'...", event);
+                                    state.delete_selected_task();
+                                }
                             }
                             _ => {
                                 // Enter debug mode when not in View focus
                                 debug!("Processing enter debug mode (d) event '{:?}'...", event);
                                 state.enter_debug_mode();
                             }
+                        }
+                    }
+                }
+                KeyEvent {
+                    code: KeyCode::Char('e'),
+                    modifiers: KeyModifiers::NONE,
+                } => {
+                    if state.is_search_mode() {
+                        state.add_search_char('e');
+                    } else if matches!(state.current_focus(), Focus::View) {
+                        if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                            // Edit task from detail view
+                            debug!("Processing edit task event '{:?}'...", event);
+                            // Clone task data to avoid borrow checker issues
+                            let task_data = state.get_task_detail().map(|t| (
+                                t.name.clone(),
+                                t.notes.clone(),
+                                t.assignee.as_ref().map(|a| a.gid.clone()),
+                                t.due_on.clone(),
+                                t.section.as_ref().map(|s| s.gid.clone()),
+                            ));
+                            
+                            if let Some((name, notes, assignee_gid, due_on, section_gid)) = task_data {
+                                // Pre-populate form with task data
+                                state.set_form_name(name);
+                                state.set_form_notes(notes.unwrap_or_default());
+                                state.set_form_assignee(assignee_gid);
+                                state.set_form_due_on(due_on.unwrap_or_default());
+                                state.set_form_section(section_gid);
+                                state.set_edit_form_state(Some(crate::state::EditFormState::Name));
+                                
+                                // Load workspace users and sections for dropdowns
+                                if let Some(workspace) = state.get_active_workspace() {
+                                    state.dispatch(crate::events::network::Event::GetWorkspaceUsers {
+                                        workspace_gid: workspace.gid.clone(),
+                                    });
+                                }
+                                if let Some(project) = state.get_project() {
+                                    state.dispatch(crate::events::network::Event::GetProjectSections {
+                                        project_gid: project.gid.clone(),
+                                    });
+                                }
+                                
+                                state.push_view(crate::state::View::EditTask);
+                                state.focus_view();
+                            }
+                        }
+                    }
+                }
+                KeyEvent {
+                    code: KeyCode::Char('c'),
+                    modifiers: KeyModifiers::NONE,
+                } => {
+                    if state.is_search_mode() {
+                        state.add_search_char('c');
+                    } else if matches!(state.current_focus(), Focus::View) {
+                        if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                            // Add comment from detail view
+                            debug!("Processing add comment event '{:?}'...", event);
+                            state.enter_comment_input_mode();
                         }
                     }
                 }
@@ -365,12 +585,83 @@ impl Handler {
                     }
                 }
                 KeyEvent {
+                    code: KeyCode::Char('n'),
+                    modifiers: KeyModifiers::NONE,
+                } => {
+                    if state.is_search_mode() {
+                        state.add_search_char('n');
+                    } else if !state.is_debug_mode() {
+                        match state.current_focus() {
+                            Focus::View => {
+                                if matches!(state.current_view(), crate::state::View::ProjectTasks | crate::state::View::TaskDetail) {
+                                    // Enter create task view
+                                    debug!("Processing create task event '{:?}'...", event);
+                                    // Initialize form state
+                                    state.clear_form();
+                                    state.set_edit_form_state(Some(crate::state::EditFormState::Name));
+                                    // Load workspace users and sections if needed
+                                    if let Some(workspace) = state.get_active_workspace() {
+                                        state.dispatch(crate::events::network::Event::GetWorkspaceUsers {
+                                            workspace_gid: workspace.gid.clone(),
+                                        });
+                                    }
+                                    if let Some(project) = state.get_project() {
+                                        state.dispatch(crate::events::network::Event::GetProjectSections {
+                                            project_gid: project.gid.clone(),
+                                        });
+                                    }
+                                    state.push_view(crate::state::View::CreateTask);
+                                    state.focus_view();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                KeyEvent {
                     code: KeyCode::Backspace,
                     modifiers: KeyModifiers::NONE,
                 } => {
                     if state.is_search_mode() {
                         debug!("Processing remove search character event '{:?}'...", event);
                         state.remove_search_char();
+                    } else if state.is_comment_input_mode() {
+                        debug!("Processing remove comment character event '{:?}'...", event);
+                        state.remove_comment_char();
+                    } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
+                        // Handle form backspace
+                        match state.get_edit_form_state() {
+                            Some(crate::state::EditFormState::Name) => {
+                                state.remove_form_name_char();
+                            }
+                            Some(crate::state::EditFormState::Notes) => {
+                                state.remove_form_notes_char();
+                            }
+                            Some(crate::state::EditFormState::DueDate) => {
+                                state.remove_form_due_on_char();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                KeyEvent {
+                    code: KeyCode::Tab,
+                    modifiers: KeyModifiers::SHIFT,
+                } => {
+                    if !state.is_search_mode() && !state.is_debug_mode() {
+                        // Shift+Tab navigation in forms
+                        if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
+                            let prev_state = match state.get_edit_form_state() {
+                                Some(crate::state::EditFormState::Name) => crate::state::EditFormState::Section,
+                                Some(crate::state::EditFormState::Notes) => crate::state::EditFormState::Name,
+                                Some(crate::state::EditFormState::Assignee) => crate::state::EditFormState::Notes,
+                                Some(crate::state::EditFormState::DueDate) => crate::state::EditFormState::Assignee,
+                                Some(crate::state::EditFormState::Section) => crate::state::EditFormState::DueDate,
+                                Some(crate::state::EditFormState::Tags) => crate::state::EditFormState::Section,
+                                None => crate::state::EditFormState::Name,
+                            };
+                            state.set_edit_form_state(Some(prev_state));
+                        }
                     }
                 }
                 KeyEvent {
@@ -380,6 +671,25 @@ impl Handler {
                     if state.is_search_mode() {
                         debug!("Processing search character '{}' event '{:?}'...", c, event);
                         state.add_search_char(c);
+                    } else if state.is_comment_input_mode() {
+                        debug!("Processing comment character '{}' event '{:?}'...", c, event);
+                        state.add_comment_char(c);
+                    } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
+                        // Handle form input
+                        match state.get_edit_form_state() {
+                            Some(crate::state::EditFormState::Name) => {
+                                state.add_form_name_char(c);
+                            }
+                            Some(crate::state::EditFormState::Notes) => {
+                                state.add_form_notes_char(c);
+                            }
+                            Some(crate::state::EditFormState::DueDate) => {
+                                state.add_form_due_on_char(c);
+                            }
+                            _ => {
+                                // Assignee and Section are selected via Enter, not typed
+                            }
+                        }
                     } else {
                         debug!("Skipping processing of terminal event '{:?}'...", event);
                     }

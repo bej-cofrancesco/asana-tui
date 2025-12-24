@@ -21,6 +21,43 @@ pub enum Event {
     },
     #[allow(dead_code)]
     RefreshTasks,
+    GetTaskDetail {
+        gid: String,
+    },
+    GetProjectSections {
+        project_gid: String,
+    },
+    GetTaskStories {
+        task_gid: String,
+    },
+    CreateStory {
+        task_gid: String,
+        text: String,
+    },
+    GetWorkspaceUsers {
+        workspace_gid: String,
+    },
+    CreateTask {
+        project_gid: String,
+        name: String,
+        notes: Option<String>,
+        assignee: Option<String>,
+        due_on: Option<String>,
+        section: Option<String>,
+    },
+    UpdateTaskFields {
+        gid: String,
+        name: Option<String>,
+        notes: Option<String>,
+        assignee: Option<String>,
+        due_on: Option<String>,
+        section: Option<String>,
+        completed: Option<bool>,
+    },
+    MoveTaskToSection {
+        task_gid: String,
+        section_gid: String,
+    },
 }
 
 /// Specify struct for managing state with network events.
@@ -48,6 +85,20 @@ impl<'a> Handler<'a> {
             Event::UpdateTask { gid, completed } => self.update_task(gid, completed).await?,
             Event::DeleteTask { gid } => self.delete_task(gid).await?,
             Event::RefreshTasks => self.refresh_tasks().await?,
+            Event::GetTaskDetail { gid } => self.get_task_detail(gid).await?,
+            Event::GetProjectSections { project_gid } => self.get_project_sections(project_gid).await?,
+            Event::GetTaskStories { task_gid } => self.get_task_stories(task_gid).await?,
+            Event::CreateStory { task_gid, text } => self.create_story(task_gid, text).await?,
+            Event::GetWorkspaceUsers { workspace_gid } => self.get_workspace_users(workspace_gid).await?,
+            Event::CreateTask { project_gid, name, notes, assignee, due_on, section } => {
+                self.create_task(project_gid, name, notes, assignee, due_on, section).await?
+            },
+            Event::UpdateTaskFields { gid, name, notes, assignee, due_on, section, completed } => {
+                self.update_task_fields(gid, name, notes, assignee, due_on, section, completed).await?
+            },
+            Event::MoveTaskToSection { task_gid, section_gid } => {
+                self.move_task_to_section(task_gid, section_gid).await?
+            },
         }
         Ok(())
     }
@@ -95,10 +146,13 @@ impl<'a> Handler<'a> {
             &project.name, &project.gid
         );
         // Determine if we should include completed tasks based on current filter
-        let include_completed = {
+        let include_completed;
+        let view_mode;
+        {
             let state = self.state.lock().await;
-            matches!(state.get_task_filter(), crate::state::TaskFilter::All | crate::state::TaskFilter::Completed)
-        };
+            include_completed = matches!(state.get_task_filter(), crate::state::TaskFilter::All | crate::state::TaskFilter::Completed);
+            view_mode = state.get_view_mode();
+        }
         
         match self
             .asana
@@ -113,6 +167,11 @@ impl<'a> Handler<'a> {
                 );
                 let mut state = self.state.lock().await;
                 state.set_tasks(tasks);
+                // If in kanban mode, also load sections
+                if view_mode == crate::state::ViewMode::Kanban {
+                    drop(state);
+                    self.get_project_sections(project.gid.clone()).await?;
+                }
                 Ok(())
             }
             Err(e) => {
@@ -214,6 +273,176 @@ impl<'a> Handler<'a> {
             }
             _ => {}
         }
+        Ok(())
+    }
+    
+    /// Get full task details.
+    ///
+    async fn get_task_detail(&mut self, task_gid: String) -> Result<()> {
+        info!("Fetching full details for task {}...", task_gid);
+        let task = self.asana.get_task(&task_gid).await?;
+        let task_gid_clone = task_gid.clone();
+        let mut state = self.state.lock().await;
+        state.set_task_detail(task);
+        drop(state);
+        // Also load stories/comments
+        self.get_task_stories(task_gid_clone).await?;
+        info!("Task details loaded successfully.");
+        Ok(())
+    }
+    
+    /// Get project sections for kanban board.
+    ///
+    async fn get_project_sections(&mut self, project_gid: String) -> Result<()> {
+        info!("Fetching sections for project {}...", project_gid);
+        let sections = self.asana.get_project_sections(&project_gid).await?;
+        let mut state = self.state.lock().await;
+        state.set_sections(sections);
+        info!("Sections loaded successfully.");
+        Ok(())
+    }
+    
+    /// Get task stories/comments.
+    ///
+    async fn get_task_stories(&mut self, task_gid: String) -> Result<()> {
+        info!("Fetching stories/comments for task {}...", task_gid);
+        let stories = self.asana.get_task_stories(&task_gid).await?;
+        let mut state = self.state.lock().await;
+        state.set_task_stories(stories);
+        info!("Stories/comments loaded successfully.");
+        Ok(())
+    }
+    
+    /// Create a story/comment on a task.
+    ///
+    async fn create_story(&mut self, task_gid: String, text: String) -> Result<()> {
+        info!("Creating comment on task {}...", task_gid);
+        self.asana.create_story(&task_gid, &text).await?;
+        // Refresh stories after creating
+        self.get_task_stories(task_gid).await?;
+        info!("Comment created successfully.");
+        Ok(())
+    }
+    
+    /// Get workspace users.
+    ///
+    async fn get_workspace_users(&mut self, workspace_gid: String) -> Result<()> {
+        info!("Fetching users for workspace {}...", workspace_gid);
+        let users = self.asana.get_workspace_users(&workspace_gid).await?;
+        let mut state = self.state.lock().await;
+        state.set_workspace_users(users);
+        info!("Users loaded successfully.");
+        Ok(())
+    }
+    
+    /// Create a new task.
+    ///
+    async fn create_task(
+        &mut self,
+        project_gid: String,
+        name: String,
+        notes: Option<String>,
+        assignee: Option<String>,
+        due_on: Option<String>,
+        section: Option<String>,
+    ) -> Result<()> {
+        info!("Creating new task '{}' in project {}...", name, project_gid);
+        let task = self.asana.create_task(
+            &project_gid,
+            &name,
+            notes.as_deref(),
+            assignee.as_deref(),
+            due_on.as_deref(),
+            section.as_deref(),
+        ).await?;
+        
+        info!("Task '{}' created successfully with GID {}", task.name, task.gid);
+        
+        // Refresh tasks after creating - need to get project from state
+        let project_gid_for_refresh;
+        {
+            let state = self.state.lock().await;
+            if let Some(project) = state.get_project() {
+                project_gid_for_refresh = project.gid.clone();
+            } else {
+                // If no project in state, use the one from the create request
+                project_gid_for_refresh = project_gid.clone();
+            }
+        }
+        
+        // Refresh the project tasks
+        self.project_tasks().await?;
+        
+        // If in kanban mode, also refresh sections
+        {
+            let state = self.state.lock().await;
+            if state.get_view_mode() == crate::state::ViewMode::Kanban {
+                drop(state);
+                self.get_project_sections(project_gid_for_refresh).await?;
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Update task fields.
+    ///
+    async fn update_task_fields(
+        &mut self,
+        gid: String,
+        name: Option<String>,
+        notes: Option<String>,
+        assignee: Option<String>,
+        due_on: Option<String>,
+        section: Option<String>,
+        completed: Option<bool>,
+    ) -> Result<()> {
+        info!("Updating task fields for {}...", gid);
+        self.asana.update_task_fields(
+            &gid,
+            name.as_deref(),
+            notes.as_deref(),
+            assignee.as_deref(),
+            due_on.as_deref(),
+            section.as_deref(),
+            completed,
+        ).await?;
+        // Refresh task detail if we're viewing it
+        let view;
+        let task_gid_to_refresh;
+        {
+            let state = self.state.lock().await;
+            view = state.current_view().clone();
+            if matches!(view, crate::state::View::TaskDetail) {
+                if let Some(task) = state.get_task_detail() {
+                    task_gid_to_refresh = Some(task.gid.clone());
+                } else {
+                    task_gid_to_refresh = None;
+                }
+            } else {
+                task_gid_to_refresh = None;
+            }
+        }
+        if let Some(gid) = task_gid_to_refresh {
+            self.get_task_detail(gid).await?;
+            return Ok(());
+        }
+        // Otherwise refresh task list
+        if matches!(view, crate::state::View::ProjectTasks) {
+            self.project_tasks().await?;
+        }
+        info!("Task updated successfully.");
+        Ok(())
+    }
+    
+    /// Move task to a different section.
+    ///
+    async fn move_task_to_section(&mut self, task_gid: String, section_gid: String) -> Result<()> {
+        info!("Moving task {} to section {}...", task_gid, section_gid);
+        self.asana.add_task_to_section(&task_gid, &section_gid).await?;
+        // Refresh tasks after moving
+        self.project_tasks().await?;
+        info!("Task moved successfully.");
         Ok(())
     }
 }

@@ -1,5 +1,5 @@
 use super::welcome::{BANNER, CONTENT};
-use super::Frame;
+use super::{create_task, edit_task, kanban, task_detail, Frame};
 use crate::state::{Focus, State, View};
 use crate::ui::widgets::styling;
 use tui::{
@@ -25,7 +25,33 @@ pub fn main(frame: &mut Frame, size: Rect, state: &mut State) {
             recently_completed(frame, size, state);
         }
         View::ProjectTasks => {
-            project_tasks(frame, size, state);
+            // Check view mode - show list or kanban
+            if state.get_view_mode() == crate::state::ViewMode::Kanban {
+                kanban::kanban(frame, size, state);
+            } else {
+                project_tasks(frame, size, state);
+            }
+        }
+        View::TaskDetail => {
+            // Check if we need to show delete confirmation dialog
+            if state.has_delete_confirmation() {
+                let task_name = state
+                    .get_task_detail()
+                    .map(|t| t.name.as_str())
+                    .unwrap_or("this task");
+                render_delete_confirmation(frame, size, task_name);
+                return;
+            }
+            task_detail::task_detail(frame, size, state);
+        }
+        View::KanbanBoard => {
+            kanban::kanban(frame, size, state);
+        }
+        View::CreateTask => {
+            create_task::create_task(frame, size, state);
+        }
+        View::EditTask => {
+            edit_task::edit_task(frame, size, state);
         }
     }
 }
@@ -125,7 +151,20 @@ fn project_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
 
     let block = view_block(&title, state);
     let tasks = state.get_filtered_tasks().to_vec();
-    let list = task_list(&tasks).block(block);
+    
+    // Check if we have a search query and tasks are empty - show "No results" instead of "Loading..."
+    let has_search_query = !state.get_search_query().is_empty()
+        && matches!(state.get_search_target(), Some(crate::state::SearchTarget::Tasks));
+    let has_loaded_tasks = !state.get_tasks().is_empty(); // We have some tasks loaded (even if filtered out)
+    
+    let list = if tasks.is_empty() && has_search_query && has_loaded_tasks {
+        // Empty search results - show "No results found"
+        tui::widgets::List::new(vec![tui::widgets::ListItem::new("No results found")])
+            .block(block)
+    } else {
+        task_list(&tasks).block(block)
+    };
+    
     frame.render_stateful_widget(list, size, state.get_tasks_list_state());
 }
 
@@ -144,11 +183,12 @@ fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
     );
     frame.render_widget(overlay, size);
 
-    // Create a centered popup dialog
-    let dialog_width = 60.min(size.width.saturating_sub(4));
-    let dialog_height = 7.min(size.height.saturating_sub(4));
-    let x = (size.width.saturating_sub(dialog_width)) / 2;
-    let y = (size.height.saturating_sub(dialog_height)) / 2;
+    // Create a centered popup dialog - make it more compact
+    let dialog_width = 50.min(size.width.saturating_sub(4));
+    let dialog_height = 6.min(size.height.saturating_sub(4));
+    // Center horizontally and vertically
+    let x = size.width.saturating_sub(dialog_width) / 2;
+    let y = size.height.saturating_sub(dialog_height) / 2;
 
     let dialog_rect = Rect {
         x,
@@ -157,10 +197,15 @@ fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
         height: dialog_height,
     };
 
-    // Format the text with better spacing
+    // Format the text with better spacing - truncate long task names
+    let display_name = if task_name.len() > 40 {
+        format!("{}...", &task_name[..37])
+    } else {
+        task_name.to_string()
+    };
     let text = format!(
-        "Are you sure you want to delete this task?\n\n  {}\n\nPress Enter to confirm, Esc to cancel",
-        task_name
+        "Delete task?\n\n{}\n\nEnter: confirm  Esc: cancel",
+        display_name
     );
 
     // Create a more prominent popup block with warning styling

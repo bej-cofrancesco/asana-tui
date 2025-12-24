@@ -5,10 +5,10 @@ use reqwest::{Method, Response};
 /// Makes requests to Asana and tries to conform response data to given model.
 ///
 pub struct Client {
-    access_token: String,
-    base_url: String,
+    pub(crate) access_token: String,
+    pub(crate) base_url: String,
     endpoint: String,
-    http_client: reqwest::Client,
+    pub(crate) http_client: reqwest::Client,
 }
 
 impl Client {

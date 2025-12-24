@@ -17,18 +17,34 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
         " j/k: navigate logs, y: copy log, / or Esc: exit debug mode"
     } else if state.has_delete_confirmation() {
         " Enter: confirm delete, Esc: cancel"
-    } else if *state.current_focus() == crate::state::Focus::View 
-        && matches!(state.current_view(), crate::state::View::ProjectTasks) {
-        "j/k: navigate, space/x: toggle complete, d: delete, f: filter, /: search, esc: refresh & back, q: quit"
+    } else if *state.current_focus() == crate::state::Focus::View {
+        match state.current_view() {
+            crate::state::View::TaskDetail => {
+                " e: edit, d: delete, c: comment, Esc: back, q: quit"
+            }
+            crate::state::View::CreateTask | crate::state::View::EditTask => {
+                " Tab/Shift+Tab: navigate fields, Enter: save, Esc: cancel"
+            }
+            crate::state::View::ProjectTasks => {
+                if state.get_view_mode() == crate::state::ViewMode::Kanban {
+                    " j/k: navigate tasks, h/l: navigate columns, Enter: view, n: create, m: move, v: list view, Esc: back, q: quit"
+                } else {
+                    " j/k: navigate, Enter: view, n: create, space/x: toggle, d: delete, f: filter, v: kanban, /: search, Esc: back, q: quit"
+                }
+            }
+            _ => {
+                "j k h l: navigate, s: add/remove shortcut, /: search, d: debug mode, enter: select, esc: cancel, q: quit"
+            }
+        }
     } else {
-        "j k h l: navigate, s: add/remove shortcut, /: search, d: debug mode, enter: select, esc: cancel, q: quit"
+        " j k h l: navigate, s: add/remove shortcut, /: search, d: debug mode, enter: select, esc: cancel, q: quit"
     };
 
     let controls_content = if state.is_search_mode() {
         // Show search mode indicator with different styling
         Spans::from(vec![
             Span::styled(
-                "SEARCH MODE:",
+                "SEARCH:",
                 Style::default()
                     .fg(Color::White)
                     .bg(Color::Blue)
@@ -40,7 +56,7 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
         // Show debug mode indicator with different styling
         Spans::from(vec![
             Span::styled(
-                "DEBUG MODE:",
+                "DEBUG:",
                 Style::default()
                     .fg(Color::White)
                     .bg(Color::Green)
@@ -48,11 +64,41 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
             ),
             Span::styled(controls_text, Style::default().fg(YELLOW)),
         ])
+    } else if state.has_delete_confirmation() {
+        Spans::from(vec![
+            Span::styled(
+                "DELETE:",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(controls_text, Style::default().fg(YELLOW)),
+        ])
+    } else if *state.current_focus() == crate::state::Focus::View
+        && matches!(state.current_view(), crate::state::View::ProjectTasks)
+    {
+        Spans::from(vec![
+            Span::styled(
+                "TASK:",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(controls_text, Style::default().fg(YELLOW)),
+        ])
     } else {
-        Spans::from(vec![Span::styled(
-            controls_text,
-            Style::default().fg(YELLOW),
-        )])
+        Spans::from(vec![
+            Span::styled(
+                "NORMAL:",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Black)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(controls_text, Style::default().fg(YELLOW)),
+        ])
     };
 
     let controls_widget = Paragraph::new(controls_content).alignment(Alignment::Left);

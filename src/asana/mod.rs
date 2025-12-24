@@ -146,6 +146,17 @@ impl Asana {
                 gid: t.gid,
                 name: t.name,
                 completed: t.completed,
+                notes: None,
+                assignee: None,
+                due_date: None,
+                due_on: None,
+                start_on: None,
+                section: None,
+                tags: vec![],
+                created_at: None,
+                modified_at: None,
+                num_subtasks: 0,
+                num_comments: 0,
             })
             .collect())
     }
@@ -184,8 +195,175 @@ impl Asana {
                 gid: t.gid,
                 name: t.name,
                 completed: t.completed,
+                notes: None,
+                assignee: None,
+                due_date: None,
+                due_on: None,
+                start_on: None,
+                section: None,
+                tags: vec![],
+                created_at: None,
+                modified_at: None,
+                num_subtasks: 0,
+                num_comments: 0,
             })
             .collect())
+    }
+
+    /// Get a single task with full details.
+    ///
+    pub async fn get_task(&mut self, task_gid: &str) -> Result<Task> {
+        debug!("Fetching full details for task GID {}...", task_gid);
+
+        // Use a simple model that doesn't require nested objects
+        // The API returns nested objects as partial (gid + resource_type) unless we request specific fields
+        // We'll fetch the basic task first, then get nested objects separately
+        model!(TaskModelSimple "tasks" {
+            name: String,
+            completed: bool,
+            notes: Option<String>,
+            due_date: Option<String>,
+            due_on: Option<String>,
+            start_on: Option<String>,
+            created_at: Option<String>,
+            modified_at: Option<String>,
+        });
+
+        // Request task with assignee, section, and tags as nested fields
+        // For GET /tasks/{task_gid}, we pass opt_fields but NO other params (no project, workspace, etc.)
+        // The API returns nested objects as partial (gid + resource_type) unless we request specific fields
+        // IMPORTANT: Always include resource_type in opt_fields as it's required by the model
+        let opt_fields = "resource_type,name,completed,notes,due_on,start_on,created_at,modified_at,assignee.name,assignee.email,memberships.section.name,tags.name";
+
+        // Build URL manually to avoid client adding conflicting params
+        let uri = format!("tasks/{}?opt_fields={}", task_gid, opt_fields);
+        let request_url = format!("{}/{}", "https://app.asana.com/api/1.0", uri);
+
+        let response = self
+            .client
+            .http_client
+            .get(&request_url)
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.client.access_token),
+            )
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let response_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| String::from("Unable to read response"));
+            anyhow::bail!(
+                "API request failed with status {}: {}",
+                status,
+                response_text
+            );
+        }
+
+        let model: Wrapper<TaskModelSimple> = response.json().await?;
+        let task_data = model.data;
+
+        // Extract assignee from extra fields
+        let assignee = if let Some(assignee_val) = task_data.extra.get("assignee") {
+            if let Some(assignee_obj) = assignee_val.as_object() {
+                if let (Some(gid_val), Some(name_val), Some(email_val)) = (
+                    assignee_obj.get("gid").and_then(|v| v.as_str()),
+                    assignee_obj.get("name").and_then(|v| v.as_str()),
+                    assignee_obj.get("email").and_then(|v| v.as_str()),
+                ) {
+                    Some(User {
+                        gid: gid_val.to_string(),
+                        name: name_val.to_string(),
+                        email: email_val.to_string(),
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Extract section from memberships
+        let section = if let Some(memberships) = task_data
+            .extra
+            .get("memberships")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|m| m.get("section"))
+            .and_then(|s| s.as_object())
+        {
+            if let (Some(gid_val), Some(name_val)) = (
+                memberships.get("gid").and_then(|v| v.as_str()),
+                memberships.get("name").and_then(|v| v.as_str()),
+            ) {
+                Some(Section {
+                    gid: gid_val.to_string(),
+                    name: name_val.to_string(),
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Extract tags
+        let tags = if let Some(tags_array) = task_data.extra.get("tags").and_then(|v| v.as_array())
+        {
+            tags_array
+                .iter()
+                .filter_map(|tag_val| {
+                    if let Some(tag_obj) = tag_val.as_object() {
+                        if let (Some(gid_val), Some(name_val)) = (
+                            tag_obj.get("gid").and_then(|v| v.as_str()),
+                            tag_obj.get("name").and_then(|v| v.as_str()),
+                        ) {
+                            Some(Tag {
+                                gid: gid_val.to_string(),
+                                name: name_val.to_string(),
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+
+        // Get subtasks count - for now, just return 0 to avoid API errors
+        // TODO: Implement proper subtasks fetching
+        let subtasks: Vec<String> = vec![];
+
+        // Get stories/comments count - for now, just return 0 to avoid API errors
+        // TODO: Implement proper stories fetching
+        let stories: Vec<String> = vec![];
+
+        Ok(Task {
+            gid: task_data.gid,
+            name: task_data.name,
+            completed: task_data.completed,
+            notes: task_data.notes,
+            assignee,
+            due_date: task_data.due_date,
+            due_on: task_data.due_on,
+            start_on: task_data.start_on,
+            section,
+            tags,
+            created_at: task_data.created_at,
+            modified_at: task_data.modified_at,
+            num_subtasks: subtasks.len(),
+            num_comments: stories.len(),
+        })
     }
 
     /// Update a task (e.g., mark as complete/incomplete).
@@ -216,7 +394,275 @@ impl Asana {
             gid: model.data.gid,
             name: model.data.name,
             completed: model.data.completed,
+            notes: None,
+            assignee: None,
+            due_date: None,
+            due_on: None,
+            start_on: None,
+            section: None,
+            tags: vec![],
+            created_at: None,
+            modified_at: None,
+            num_subtasks: 0,
+            num_comments: 0,
         })
+    }
+
+    /// Get all sections for a project (for kanban board).
+    ///
+    pub async fn get_project_sections(&mut self, project_gid: &str) -> Result<Vec<Section>> {
+        debug!("Fetching sections for project GID {}...", project_gid);
+
+        model!(SectionModel "sections" { name: String });
+
+        let data: Vec<SectionModel> = self
+            .client
+            .list_paginated::<SectionModel>(Some(vec![("project", project_gid)]), Some(100))
+            .await?;
+
+        Ok(data
+            .into_iter()
+            .map(|s| Section {
+                gid: s.gid,
+                name: s.name,
+            })
+            .collect())
+    }
+
+    /// Get all stories/comments for a task.
+    ///
+    pub async fn get_task_stories(&mut self, task_gid: &str) -> Result<Vec<Story>> {
+        debug!("Fetching stories/comments for task GID {}...", task_gid);
+
+        model!(UserModel "users" { name: String, email: String });
+        model!(StoryModel "stories" {
+            text: String,
+            created_at: Option<String>,
+            created_by: Option<UserModel>,
+        } UserModel);
+
+        let data: Vec<StoryModel> = self
+            .client
+            .list_paginated::<StoryModel>(Some(vec![("resource", task_gid)]), Some(100))
+            .await?;
+
+        Ok(data
+            .into_iter()
+            .map(|s| Story {
+                gid: s.gid,
+                text: s.text,
+                created_at: s.created_at,
+                created_by: s.created_by.map(|u| User {
+                    gid: u.gid,
+                    name: u.name,
+                    email: u.email,
+                }),
+            })
+            .collect())
+    }
+
+    /// Create a story/comment on a task.
+    ///
+    pub async fn create_story(&mut self, task_gid: &str, text: &str) -> Result<Story> {
+        debug!("Creating story/comment on task GID {}...", task_gid);
+
+        model!(UserModel "users" { name: String, email: String });
+        model!(StoryModel "stories" {
+            text: String,
+            created_at: Option<String>,
+            created_by: Option<UserModel>,
+        } UserModel);
+
+        let body = serde_json::json!({
+            "data": {
+                "text": text,
+                "resource": task_gid
+            }
+        });
+
+        let model: Wrapper<StoryModel> = self
+            .client
+            .call_with_body::<StoryModel>(reqwest::Method::POST, None, None, Some(body))
+            .await?
+            .json()
+            .await?;
+
+        Ok(Story {
+            gid: model.data.gid,
+            text: model.data.text,
+            created_at: model.data.created_at,
+            created_by: model.data.created_by.map(|u| User {
+                gid: u.gid,
+                name: u.name,
+                email: u.email,
+            }),
+        })
+    }
+
+    /// Get all users in a workspace.
+    ///
+    pub async fn get_workspace_users(&mut self, workspace_gid: &str) -> Result<Vec<User>> {
+        debug!("Fetching users for workspace GID {}...", workspace_gid);
+
+        model!(UserModel "users" { name: String, email: String });
+
+        let data: Vec<UserModel> = self
+            .client
+            .list_paginated::<UserModel>(Some(vec![("workspace", workspace_gid)]), Some(100))
+            .await?;
+
+        Ok(data
+            .into_iter()
+            .map(|u| User {
+                gid: u.gid,
+                name: u.name,
+                email: u.email,
+            })
+            .collect())
+    }
+
+    /// Create a new task.
+    ///
+    pub async fn create_task(
+        &mut self,
+        project_gid: &str,
+        name: &str,
+        notes: Option<&str>,
+        assignee: Option<&str>,
+        due_on: Option<&str>,
+        section: Option<&str>,
+    ) -> Result<Task> {
+        debug!("Creating new task in project GID {}...", project_gid);
+
+        model!(TaskModel "tasks" { name: String, completed: bool });
+
+        let mut data = serde_json::json!({
+            "name": name,
+            "projects": [project_gid]
+        });
+
+        if let Some(notes_val) = notes {
+            data["notes"] = serde_json::Value::String(notes_val.to_string());
+        }
+        if let Some(assignee_val) = assignee {
+            data["assignee"] = serde_json::Value::String(assignee_val.to_string());
+        }
+        if let Some(due_on_val) = due_on {
+            data["due_on"] = serde_json::Value::String(due_on_val.to_string());
+        }
+
+        let body = serde_json::json!({
+            "data": data
+        });
+
+        let model: Wrapper<TaskModel> = self
+            .client
+            .call_with_body::<TaskModel>(reqwest::Method::POST, None, None, Some(body))
+            .await?
+            .json()
+            .await?;
+
+        // If section is specified, add task to that section
+        if let Some(section_gid) = section {
+            self.add_task_to_section(&model.data.gid, section_gid)
+                .await?;
+        }
+
+        Ok(Task {
+            gid: model.data.gid,
+            name: model.data.name,
+            completed: model.data.completed,
+            notes: None,
+            assignee: None,
+            due_date: None,
+            due_on: None,
+            start_on: None,
+            section: None,
+            tags: vec![],
+            created_at: None,
+            modified_at: None,
+            num_subtasks: 0,
+            num_comments: 0,
+        })
+    }
+
+    /// Update task fields.
+    ///
+    pub async fn update_task_fields(
+        &mut self,
+        task_gid: &str,
+        name: Option<&str>,
+        notes: Option<&str>,
+        assignee: Option<&str>,
+        due_on: Option<&str>,
+        section: Option<&str>,
+        completed: Option<bool>,
+    ) -> Result<Task> {
+        debug!("Updating task fields for GID {}...", task_gid);
+
+        model!(TaskModel "tasks" { name: String, completed: bool });
+
+        let mut data = serde_json::json!({});
+
+        if let Some(name_val) = name {
+            data["name"] = serde_json::Value::String(name_val.to_string());
+        }
+        if let Some(notes_val) = notes {
+            data["notes"] = serde_json::Value::String(notes_val.to_string());
+        }
+        if let Some(assignee_val) = assignee {
+            data["assignee"] = serde_json::Value::String(assignee_val.to_string());
+        }
+        if let Some(due_on_val) = due_on {
+            data["due_on"] = serde_json::Value::String(due_on_val.to_string());
+        }
+        if let Some(completed_val) = completed {
+            data["completed"] = serde_json::Value::Bool(completed_val);
+        }
+
+        let body = serde_json::json!({
+            "data": data
+        });
+
+        let model: Wrapper<TaskModel> = self
+            .client
+            .call_with_body::<TaskModel>(reqwest::Method::PUT, Some(task_gid), None, Some(body))
+            .await?
+            .json()
+            .await?;
+
+        // If section is specified, move task to that section
+        if let Some(section_gid) = section {
+            self.add_task_to_section(&model.data.gid, section_gid)
+                .await?;
+        }
+
+        // Return updated task by fetching it again
+        self.get_task(&model.data.gid).await
+    }
+
+    /// Add a task to a section (move task in kanban).
+    ///
+    pub async fn add_task_to_section(&mut self, task_gid: &str, section_gid: &str) -> Result<()> {
+        debug!("Moving task {} to section {}...", task_gid, section_gid);
+
+        // Create a dummy model for the endpoint
+        model!(DummyModel "sections" { name: String });
+
+        let body = serde_json::json!({
+            "data": {
+                "task": task_gid
+            }
+        });
+
+        // Use the add task to section endpoint
+        // The endpoint is sections/{section_gid}/addTask
+        let endpoint = format!("sections/{}/addTask", section_gid);
+        self.client
+            .call_with_body::<DummyModel>(reqwest::Method::POST, Some(&endpoint), None, Some(body))
+            .await?;
+
+        Ok(())
     }
 
     /// Delete a task.

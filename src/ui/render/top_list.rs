@@ -33,7 +33,8 @@ pub fn top_list(frame: &mut Frame, size: Rect, state: &mut State) {
     }
 
     let filtered_projects = state.get_filtered_projects();
-    if filtered_projects.is_empty() && !state.is_search_mode() {
+    // Show spinner only if we're not searching and have no projects loaded yet
+    if filtered_projects.is_empty() && !state.is_search_mode() && state.get_projects().is_empty() {
         frame.render_widget(spinner::widget(state, size.height).block(block), size);
         return;
     }
@@ -51,22 +52,32 @@ pub fn top_list(frame: &mut Frame, size: Rect, state: &mut State) {
     };
     block = block.title(title);
 
-    let items: Vec<ListItem> = filtered_projects
-        .iter()
-        .map(|p| {
-            // Make starred projects italic
-            if state.is_project_starred(&p.gid) {
-                ListItem::new(Spans::from(vec![
-                    Span::styled(
-                        p.name.to_owned(),
-                        styling::normal_text_style().add_modifier(Modifier::ITALIC),
-                    )
-                ]))
-            } else {
-                ListItem::new(p.name.to_owned())
-            }
-        })
-        .collect();
+    // Check if we have a search query and projects are empty - show "No results" instead of spinner
+    let has_search_query = !state.get_search_query().is_empty()
+        && matches!(state.get_search_target(), Some(crate::state::SearchTarget::Projects));
+    let has_loaded_projects = !state.get_projects().is_empty(); // We have some projects loaded (even if filtered out)
+    
+    let items: Vec<ListItem> = if filtered_projects.is_empty() && has_search_query && has_loaded_projects {
+        // Empty search results - show "No results found"
+        vec![ListItem::new("No results found")]
+    } else {
+        filtered_projects
+            .iter()
+            .map(|p| {
+                // Make starred projects italic
+                if state.is_project_starred(&p.gid) {
+                    ListItem::new(Spans::from(vec![
+                        Span::styled(
+                            p.name.to_owned(),
+                            styling::normal_text_style().add_modifier(Modifier::ITALIC),
+                        )
+                    ]))
+                } else {
+                    ListItem::new(p.name.to_owned())
+                }
+            })
+            .collect()
+    };
     
     let list = List::new(items)
         .style(styling::normal_text_style())

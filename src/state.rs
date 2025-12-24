@@ -1,5 +1,5 @@
 use crate::app::NetworkEventSender;
-use crate::asana::{Project, Task, User, Workspace};
+use crate::asana::{Project, Section, Story, Task, User, Workspace};
 use crate::events::network::Event as NetworkEvent;
 use crate::ui::SPINNER_FRAME_COUNT;
 use log::*;
@@ -33,6 +33,30 @@ pub enum View {
     RecentlyModified,
     RecentlyCompleted,
     ProjectTasks,
+    TaskDetail,
+    KanbanBoard,
+    CreateTask,
+    EditTask,
+}
+
+/// Specifying view mode (list or kanban).
+///
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum ViewMode {
+    List,
+    Kanban,
+}
+
+/// Specifying edit form field state.
+///
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum EditFormState {
+    Name,
+    Notes,
+    Assignee,
+    DueDate,
+    Section,
+    Tags,
 }
 
 /// Specifying task filter options.
@@ -87,6 +111,23 @@ pub struct State {
     debug_entries: Vec<String>, // Store log entries for navigation and copying
     task_filter: TaskFilter,
     delete_confirmation: Option<String>, // GID of task pending deletion confirmation
+    current_task_detail: Option<Task>,   // Currently viewed task with full details
+    sections: Vec<Section>,              // Project sections for kanban
+    workspace_users: Vec<User>,          // Users for assignment dropdowns
+    task_stories: Vec<Story>,            // Comments for current task
+    view_mode: ViewMode,                 // List or Kanban view
+    edit_mode: bool,                     // Whether in edit mode
+    edit_form_state: Option<EditFormState>, // Current form field being edited
+    kanban_column_index: usize,          // Current column in kanban view
+    kanban_task_index: usize,            // Current task index in selected column
+    comment_input_mode: bool,            // Whether in comment input mode
+    comment_input_text: String,          // Current comment text being typed
+    // Form input fields
+    form_name: String,
+    form_notes: String,
+    form_assignee: Option<String>, // GID of selected assignee
+    form_due_on: String, // Date string
+    form_section: Option<String>, // GID of selected section
 }
 
 /// Specifies which panel is being searched.
@@ -132,6 +173,22 @@ impl Default for State {
             debug_entries: vec![],
             task_filter: TaskFilter::Incomplete,
             delete_confirmation: None,
+            current_task_detail: None,
+            sections: vec![],
+            workspace_users: vec![],
+            task_stories: vec![],
+            view_mode: ViewMode::List,
+            edit_mode: false,
+            edit_form_state: None,
+            kanban_column_index: 0,
+            kanban_task_index: 0,
+            comment_input_mode: false,
+            comment_input_text: String::new(),
+            form_name: String::new(),
+            form_notes: String::new(),
+            form_assignee: None,
+            form_due_on: String::new(),
+            form_section: None,
         }
     }
 }
@@ -455,6 +512,30 @@ impl State {
         self.view_stack.last().unwrap()
     }
 
+    /// Push a view onto the view stack.
+    ///
+    pub fn push_view(&mut self, view: View) -> &mut Self {
+        self.view_stack.push(view);
+        self
+    }
+
+    /// Pop a view from the view stack.
+    ///
+    pub fn pop_view(&mut self) -> Option<View> {
+        // Don't pop if we're at the base view (Welcome)
+        if self.view_stack.len() > 1 {
+            self.view_stack.pop()
+        } else {
+            None
+        }
+    }
+    
+    /// Get the length of the view stack.
+    ///
+    pub fn view_stack_len(&self) -> usize {
+        self.view_stack.len()
+    }
+
     /// Return the list of tasks.
     ///
     pub fn get_tasks(&self) -> &Vec<Task> {
@@ -639,6 +720,13 @@ impl State {
         self.delete_confirmation.is_some()
     }
 
+    /// Set delete confirmation for a task GID (used from detail view).
+    ///
+    pub fn set_delete_confirmation(&mut self, task_gid: String) -> &mut Self {
+        self.delete_confirmation = Some(task_gid);
+        self
+    }
+
     /// Get the current task filter.
     ///
     pub fn get_task_filter(&self) -> TaskFilter {
@@ -676,6 +764,400 @@ impl State {
         }
 
         self.update_search_filters();
+        self
+    }
+
+    /// Set the current task detail.
+    ///
+    pub fn set_task_detail(&mut self, task: Task) -> &mut Self {
+        self.current_task_detail = Some(task);
+        self
+    }
+
+    /// Get the current task detail.
+    ///
+    pub fn get_task_detail(&self) -> Option<&Task> {
+        self.current_task_detail.as_ref()
+    }
+
+    /// Clear the current task detail.
+    ///
+    pub fn clear_task_detail(&mut self) -> &mut Self {
+        self.current_task_detail = None;
+        self.task_stories = vec![];
+        self
+    }
+
+    /// Set sections for kanban board.
+    ///
+    pub fn set_sections(&mut self, sections: Vec<Section>) -> &mut Self {
+        self.sections = sections;
+        self
+    }
+
+    /// Get sections.
+    ///
+    pub fn get_sections(&self) -> &[Section] {
+        &self.sections
+    }
+
+    /// Set workspace users.
+    ///
+    pub fn set_workspace_users(&mut self, users: Vec<User>) -> &mut Self {
+        self.workspace_users = users;
+        self
+    }
+
+    /// Get workspace users.
+    ///
+    pub fn get_workspace_users(&self) -> &[User] {
+        &self.workspace_users
+    }
+
+    /// Set task stories/comments.
+    ///
+    pub fn set_task_stories(&mut self, stories: Vec<Story>) -> &mut Self {
+        self.task_stories = stories;
+        self
+    }
+
+    /// Get task stories/comments.
+    ///
+    pub fn get_task_stories(&self) -> &[Story] {
+        &self.task_stories
+    }
+
+    /// Toggle view mode (List/Kanban).
+    ///
+    pub fn toggle_view_mode(&mut self) -> &mut Self {
+        self.view_mode = match self.view_mode {
+            ViewMode::List => ViewMode::Kanban,
+            ViewMode::Kanban => ViewMode::List,
+        };
+        self
+    }
+
+    /// Get current view mode.
+    ///
+    pub fn get_view_mode(&self) -> ViewMode {
+        self.view_mode
+    }
+
+    /// Set kanban column index.
+    ///
+    pub fn set_kanban_column_index(&mut self, index: usize) -> &mut Self {
+        self.kanban_column_index = index.min(self.sections.len().saturating_sub(1));
+        self
+    }
+
+    /// Get kanban column index.
+    ///
+    pub fn get_kanban_column_index(&self) -> usize {
+        self.kanban_column_index
+    }
+
+    /// Navigate to next kanban column.
+    ///
+    pub fn next_kanban_column(&mut self) -> &mut Self {
+        if !self.sections.is_empty() {
+            self.kanban_column_index = (self.kanban_column_index + 1) % self.sections.len();
+        }
+        self
+    }
+
+    /// Navigate to previous kanban column.
+    ///
+    pub fn previous_kanban_column(&mut self) -> &mut Self {
+        if !self.sections.is_empty() {
+            if self.kanban_column_index > 0 {
+                self.kanban_column_index -= 1;
+            } else {
+                self.kanban_column_index = self.sections.len() - 1;
+            }
+            // Reset task index when changing columns
+            self.kanban_task_index = 0;
+        }
+        self
+    }
+    
+    /// Set kanban task index.
+    ///
+    pub fn set_kanban_task_index(&mut self, index: usize) -> &mut Self {
+        self.kanban_task_index = index;
+        self
+    }
+    
+    /// Get kanban task index.
+    ///
+    pub fn get_kanban_task_index(&self) -> usize {
+        self.kanban_task_index
+    }
+    
+    /// Navigate to next task in current kanban column.
+    ///
+    pub fn next_kanban_task(&mut self) -> &mut Self {
+        if !self.sections.is_empty() && self.kanban_column_index < self.sections.len() {
+            let section = &self.sections[self.kanban_column_index];
+            let section_tasks: Vec<&Task> = self.tasks
+                .iter()
+                .filter(|t| {
+                    t.section
+                        .as_ref()
+                        .map(|s| s.gid == section.gid)
+                        .unwrap_or(false)
+                })
+                .collect();
+            
+            if !section_tasks.is_empty() {
+                self.kanban_task_index = (self.kanban_task_index + 1) % section_tasks.len();
+            }
+        }
+        self
+    }
+    
+    /// Navigate to previous task in current kanban column.
+    ///
+    pub fn previous_kanban_task(&mut self) -> &mut Self {
+        if !self.sections.is_empty() && self.kanban_column_index < self.sections.len() {
+            let section = &self.sections[self.kanban_column_index];
+            let section_tasks: Vec<&Task> = self.tasks
+                .iter()
+                .filter(|t| {
+                    t.section
+                        .as_ref()
+                        .map(|s| s.gid == section.gid)
+                        .unwrap_or(false)
+                })
+                .collect();
+            
+            if !section_tasks.is_empty() {
+                if self.kanban_task_index > 0 {
+                    self.kanban_task_index -= 1;
+                } else {
+                    self.kanban_task_index = section_tasks.len() - 1;
+                }
+            }
+        }
+        self
+    }
+    
+    /// Get current selected task in kanban view.
+    ///
+    pub fn get_kanban_selected_task(&self) -> Option<&Task> {
+        if self.sections.is_empty() || self.kanban_column_index >= self.sections.len() {
+            return None;
+        }
+        
+        let section = &self.sections[self.kanban_column_index];
+        let section_tasks: Vec<&Task> = self.tasks
+            .iter()
+            .filter(|t| {
+                t.section
+                    .as_ref()
+                    .map(|s| s.gid == section.gid)
+                    .unwrap_or(false)
+            })
+            .collect();
+        
+        if self.kanban_task_index < section_tasks.len() {
+            Some(section_tasks[self.kanban_task_index])
+        } else {
+            None
+        }
+    }
+
+    /// Get edit form state.
+    ///
+    pub fn get_edit_form_state(&self) -> Option<EditFormState> {
+        self.edit_form_state
+    }
+
+    /// Set edit form state.
+    ///
+    pub fn set_edit_form_state(&mut self, state: Option<EditFormState>) -> &mut Self {
+        self.edit_form_state = state;
+        self
+    }
+
+    /// Enter comment input mode.
+    ///
+    pub fn enter_comment_input_mode(&mut self) -> &mut Self {
+        self.comment_input_mode = true;
+        self.comment_input_text.clear();
+        self
+    }
+
+    /// Exit comment input mode.
+    ///
+    pub fn exit_comment_input_mode(&mut self) -> &mut Self {
+        self.comment_input_mode = false;
+        self.comment_input_text.clear();
+        self
+    }
+
+    /// Check if in comment input mode.
+    ///
+    pub fn is_comment_input_mode(&self) -> bool {
+        self.comment_input_mode
+    }
+
+    /// Get comment input text.
+    ///
+    pub fn get_comment_input_text(&self) -> &str {
+        &self.comment_input_text
+    }
+
+    /// Add character to comment input.
+    ///
+    pub fn add_comment_char(&mut self, c: char) -> &mut Self {
+        self.comment_input_text.push(c);
+        self
+    }
+
+    /// Remove last character from comment input.
+    ///
+    pub fn remove_comment_char(&mut self) -> &mut Self {
+        self.comment_input_text.pop();
+        self
+    }
+
+    /// Submit comment (returns the text and clears input).
+    ///
+    pub fn submit_comment(&mut self) -> String {
+        let text = self.comment_input_text.clone();
+        self.comment_input_text.clear();
+        self.comment_input_mode = false;
+        text
+    }
+    
+    /// Get form name.
+    ///
+    pub fn get_form_name(&self) -> &str {
+        &self.form_name
+    }
+    
+    /// Set form name.
+    ///
+    pub fn set_form_name(&mut self, name: String) -> &mut Self {
+        self.form_name = name;
+        self
+    }
+    
+    /// Add character to form name.
+    ///
+    pub fn add_form_name_char(&mut self, c: char) -> &mut Self {
+        self.form_name.push(c);
+        self
+    }
+    
+    /// Remove last character from form name.
+    ///
+    pub fn remove_form_name_char(&mut self) -> &mut Self {
+        self.form_name.pop();
+        self
+    }
+    
+    /// Get form notes.
+    ///
+    pub fn get_form_notes(&self) -> &str {
+        &self.form_notes
+    }
+    
+    /// Set form notes.
+    ///
+    pub fn set_form_notes(&mut self, notes: String) -> &mut Self {
+        self.form_notes = notes;
+        self
+    }
+    
+    /// Add character to form notes.
+    ///
+    pub fn add_form_notes_char(&mut self, c: char) -> &mut Self {
+        self.form_notes.push(c);
+        self
+    }
+    
+    /// Remove last character from form notes.
+    ///
+    pub fn remove_form_notes_char(&mut self) -> &mut Self {
+        self.form_notes.pop();
+        self
+    }
+    
+    /// Get form assignee.
+    ///
+    pub fn get_form_assignee(&self) -> Option<&String> {
+        self.form_assignee.as_ref()
+    }
+    
+    /// Set form assignee.
+    ///
+    pub fn set_form_assignee(&mut self, assignee: Option<String>) -> &mut Self {
+        self.form_assignee = assignee;
+        self
+    }
+    
+    /// Get form due date.
+    ///
+    pub fn get_form_due_on(&self) -> &str {
+        &self.form_due_on
+    }
+    
+    /// Set form due date.
+    ///
+    pub fn set_form_due_on(&mut self, due_on: String) -> &mut Self {
+        self.form_due_on = due_on;
+        self
+    }
+    
+    /// Add character to form due date.
+    ///
+    pub fn add_form_due_on_char(&mut self, c: char) -> &mut Self {
+        self.form_due_on.push(c);
+        self
+    }
+    
+    /// Remove last character from form due date.
+    ///
+    pub fn remove_form_due_on_char(&mut self) -> &mut Self {
+        self.form_due_on.pop();
+        self
+    }
+    
+    /// Get form section.
+    ///
+    pub fn get_form_section(&self) -> Option<&String> {
+        self.form_section.as_ref()
+    }
+    
+    /// Set form section.
+    ///
+    pub fn set_form_section(&mut self, section: Option<String>) -> &mut Self {
+        self.form_section = section;
+        self
+    }
+    
+    /// Clear form fields.
+    ///
+    pub fn clear_form(&mut self) -> &mut Self {
+        self.form_name.clear();
+        self.form_notes.clear();
+        self.form_assignee = None;
+        self.form_due_on.clear();
+        self.form_section = None;
+        self.edit_form_state = None;
+        self
+    }
+    
+    /// Initialize edit form with task data.
+    ///
+    pub fn init_edit_form(&mut self, task: &Task) -> &mut Self {
+        self.form_name = task.name.clone();
+        self.form_notes = task.notes.clone().unwrap_or_default();
+        self.form_assignee = task.assignee.as_ref().map(|u| u.gid.clone());
+        self.form_due_on = task.due_on.clone().unwrap_or_default();
+        self.form_section = task.section.as_ref().map(|s| s.gid.clone());
+        self.edit_form_state = Some(EditFormState::Name);
         self
     }
 
