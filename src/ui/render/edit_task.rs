@@ -1,3 +1,4 @@
+use super::form_dropdowns;
 use super::Frame;
 use crate::state::{EditFormState, State};
 use crate::ui::widgets::styling;
@@ -71,7 +72,7 @@ pub fn edit_task(frame: &mut Frame, size: Rect, state: &State) {
 
     // Assignee field - show dropdown if focused
     if form_state == EditFormState::Assignee {
-        render_assignee_dropdown(frame, form_chunks[2], state);
+        form_dropdowns::render_assignee_dropdown(frame, form_chunks[2], state);
     } else {
         let assignee_text = if let Some(assignee_gid) = state.get_form_assignee() {
             state
@@ -103,7 +104,7 @@ pub fn edit_task(frame: &mut Frame, size: Rect, state: &State) {
 
     // Section field - show dropdown if focused
     if form_state == EditFormState::Section {
-        render_section_dropdown(frame, form_chunks[4], state);
+        form_dropdowns::render_section_dropdown(frame, form_chunks[4], state);
     } else {
         let section_text = if let Some(section_gid) = state.get_form_section() {
             state
@@ -218,92 +219,3 @@ fn render_notes_field(
     frame.render_widget(paragraph, size);
 }
 
-fn render_assignee_dropdown(frame: &mut Frame, size: Rect, state: &State) {
-    use tui::widgets::{List, ListItem};
-    use tui::layout::Layout;
-    use tui::layout::Constraint;
-    use tui::layout::Direction;
-    
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Search input
-            Constraint::Min(1),   // List
-        ])
-        .split(size);
-    
-    // Search input
-    let search_text = state.get_assignee_search();
-    let search_block = Block::default()
-        .borders(Borders::ALL)
-        .title("Search Assignee")
-        .border_style(styling::active_block_border_style());
-    let search_para = Paragraph::new(format!("> {}", search_text))
-        .block(search_block)
-        .style(styling::normal_text_style());
-    frame.render_widget(search_para, chunks[0]);
-    
-    // Filtered users list
-    let filtered_users = state.get_filtered_assignees();
-    let selected_index = state.get_assignee_dropdown_index();
-    
-    let items: Vec<ListItem> = filtered_users
-        .iter()
-        .enumerate()
-        .map(|(i, user)| {
-            let style = if i == selected_index {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                styling::normal_text_style()
-            };
-            let display_text = if !user.email.is_empty() {
-                format!("{} ({})", user.name, user.email)
-            } else {
-                user.name.clone()
-            };
-            ListItem::new(Spans::from(Span::styled(display_text, style)))
-        })
-        .collect();
-    
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title("Assignee (j/k to navigate, Enter to select)")
-        .border_style(styling::active_block_border_style());
-    
-    let list = List::new(items).block(block);
-    frame.render_widget(list, chunks[1]);
-}
-
-fn render_section_dropdown(frame: &mut Frame, size: Rect, state: &State) {
-    use tui::widgets::{List, ListItem};
-    
-    let sections = state.get_sections();
-    let selected_index = state.get_section_dropdown_index();
-    
-    let items: Vec<ListItem> = sections
-        .iter()
-        .enumerate()
-        .map(|(i, section)| {
-            let style = if i == selected_index {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                styling::normal_text_style()
-            };
-            ListItem::new(Spans::from(Span::styled(&section.name, style)))
-        })
-        .collect();
-    
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title("Section (j/k to navigate, Enter to select)")
-        .border_style(styling::active_block_border_style());
-    
-    let list = List::new(items).block(block);
-    frame.render_widget(list, size);
-}

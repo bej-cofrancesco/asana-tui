@@ -658,41 +658,142 @@ impl Asana {
     ) -> Result<Task> {
         debug!("Updating task fields for GID {}...", task_gid);
 
-        model!(TaskModel "tasks" { name: String, completed: bool });
+        // Include all fields we might send in the update
+        // Note: section is NOT included here because it's handled via a separate endpoint
+        model!(TaskModel "tasks" { 
+            name: String, 
+            completed: bool,
+            notes: Option<String>,
+            assignee: Option<String>,
+            due_on: Option<String>,
+        });
 
         let mut data = serde_json::json!({});
 
+        // Only add fields that are Some and non-empty (after trimming)
+        // This ensures we never send empty strings to the API
         if let Some(name_val) = name {
-            if !name_val.is_empty() {
-                data["name"] = serde_json::Value::String(name_val.to_string());
+            let trimmed = name_val.trim();
+            if !trimmed.is_empty() {
+                data["name"] = serde_json::Value::String(trimmed.to_string());
+                info!("Adding name field: '{}'", trimmed);
+            } else {
+                warn!("Skipping empty name field");
             }
         }
         if let Some(notes_val) = notes {
-            // Notes can be empty string to clear them
-            data["notes"] = serde_json::Value::String(notes_val.to_string());
+            let trimmed = notes_val.trim();
+            if !trimmed.is_empty() {
+                data["notes"] = serde_json::Value::String(trimmed.to_string());
+                info!("Adding notes field (length: {})", trimmed.len());
+            } else {
+                warn!("Skipping empty notes field (original length: {})", notes_val.len());
+            }
         }
         if let Some(assignee_val) = assignee {
-            if !assignee_val.is_empty() {
-                data["assignee"] = serde_json::Value::String(assignee_val.to_string());
+            let trimmed = assignee_val.trim();
+            if !trimmed.is_empty() {
+                data["assignee"] = serde_json::Value::String(trimmed.to_string());
+                info!("Adding assignee field: '{}'", trimmed);
+            } else {
+                warn!("Skipping empty assignee field");
             }
         }
         if let Some(due_on_val) = due_on {
-            if !due_on_val.is_empty() {
-                data["due_on"] = serde_json::Value::String(due_on_val.to_string());
+            let trimmed = due_on_val.trim();
+            if !trimmed.is_empty() {
+                data["due_on"] = serde_json::Value::String(trimmed.to_string());
+                info!("Adding due_on field: '{}'", trimmed);
+            } else {
+                warn!("Skipping empty due_on field");
             }
         }
         if let Some(completed_val) = completed {
             data["completed"] = serde_json::Value::Bool(completed_val);
+            info!("Adding completed field: {}", completed_val);
+        }
+
+        // Debug: log what we're sending
+        info!("Updating task with data: {:?}", data);
+        info!("Data object keys: {:?}", data.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+        
+        // Ensure we have at least one field to update
+        if let Some(obj) = data.as_object() {
+            if obj.is_empty() {
+                warn!("No fields to update, skipping API call");
+                // Return the current task without making an API call
+                return self.get_task(task_gid).await;
+            }
+        }
+
+        // Final validation: ensure no empty string values in data
+        if let Some(obj) = data.as_object_mut() {
+            let mut removed_fields = Vec::new();
+            obj.retain(|key, value| {
+                match value {
+                    serde_json::Value::String(s) => {
+                        if s.trim().is_empty() {
+                            removed_fields.push(key.clone());
+                            error!("⚠️ REMOVING EMPTY STRING FIELD: {} (value: '{:?}')", key, s);
+                            false
+                        } else {
+                            info!("✓ Keeping field: {} = '{}' (len: {})", key, if s.len() > 50 { format!("{}...", &s[..50]) } else { s.clone() }, s.len());
+                            true
+                        }
+                    }
+                    serde_json::Value::Null => {
+                        removed_fields.push(key.clone());
+                        error!("⚠️ REMOVING NULL FIELD: {}", key);
+                        false
+                    }
+                    _ => {
+                        info!("✓ Keeping non-string field: {} = {:?}", key, value);
+                        true
+                    }
+                }
+            });
+            if !removed_fields.is_empty() {
+                error!("❌ Removed {} empty/null fields: {:?}", removed_fields.len(), removed_fields);
+            }
         }
 
         let body = serde_json::json!({
             "data": data
         });
 
+        info!("📤 Final request body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
+        
+        // Log field order to help identify which field is [1]
+        if let Some(obj) = body.get("data").and_then(|d| d.as_object()) {
+            let field_order: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+            info!("📋 Field order in request: {:?}", field_order);
+            for (idx, key) in field_order.iter().enumerate() {
+                if let Some(val) = obj.get(*key) {
+                    let display_val = if let Some(s) = val.as_str() {
+                        if s.trim().is_empty() {
+                            format!("⚠️ EMPTY STRING (len: {})", s.len())
+                        } else if s.len() > 30 { 
+                            format!("{}... (len: {})", &s[..30], s.len()) 
+                        } else { 
+                            format!("'{}'", s) 
+                        }
+                    } else {
+                        format!("{:?}", val)
+                    };
+                    info!("  [{}] {} = {}", idx, key, display_val);
+                }
+            }
+        }
+
+        // Log the full URL that will be called (including opt_fields)
+        info!("🔗 About to call PUT /tasks/{} with opt_fields from model", task_gid);
+        
         let response = self
             .client
             .call_with_body::<TaskModel>(reqwest::Method::PUT, Some(task_gid), None, Some(body))
             .await?;
+        
+        info!("📥 Response status: {}", response.status());
 
         // Check response status
         if !response.status().is_success() {

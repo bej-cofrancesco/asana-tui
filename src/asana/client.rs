@@ -229,19 +229,32 @@ impl Client {
         // Clear relational endpoint state
         self.endpoint.clear();
 
-        // Add relational and root field inclusions as query parameters
-        let opts = format!(
-            "this.({}),{}",
-            T::field_names().join("|"),
-            T::opt_strings().join(",")
-        );
-        let mut uri = format!("{}?opt_fields={}", uri, opts);
+        // For PUT/DELETE requests, don't add opt_fields as it can cause validation issues
+        // opt_fields is primarily for GET requests to specify which fields to return
+        // For PUT requests, we only want to send the data in the body, not validate against opt_fields
+        let mut uri = if matches!(method, Method::PUT | Method::DELETE) {
+            // For PUT/DELETE, don't add opt_fields - just use the base URI
+            uri
+        } else {
+            // For GET/POST, add opt_fields to specify which fields to return
+            let opts = format!(
+                "this.({}),{}",
+                T::field_names().join("|"),
+                T::opt_strings().join(",")
+            );
+            format!("{}?opt_fields={}", uri, opts)
+        };
+        
         if let Some(params) = params {
+            let separator = if uri.contains('?') { "&" } else { "?" };
             for param in params.iter() {
-                uri = format!("{}&{}={}", uri, param.0, param.1);
+                uri = format!("{}{}{}={}", uri, separator, param.0, param.1);
             }
         }
         let request_url = format!("{}/{}", &self.base_url, uri);
+
+        // Log the full URL for debugging
+        log::info!("🌐 Full request URL: {}", request_url);
 
         // Make request
         let mut request = self

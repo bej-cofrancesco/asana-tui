@@ -133,6 +133,12 @@ pub struct State {
     form_assignee_search: String,  // Search text for filtering assignees
     form_due_on: String,           // Date string
     form_section: Option<String>,  // GID of selected section
+    // Original form values (for tracking changes)
+    original_form_name: String,
+    original_form_notes: String,
+    original_form_assignee: Option<String>,
+    original_form_due_on: String,
+    original_form_section: Option<String>,
     // Dropdown selection indices
     assignee_dropdown_index: usize,
     section_dropdown_index: usize,
@@ -214,6 +220,11 @@ impl Default for State {
             form_assignee_search: String::new(),
             form_due_on: String::new(),
             form_section: None,
+            original_form_name: String::new(),
+            original_form_notes: String::new(),
+            original_form_assignee: None,
+            original_form_due_on: String::new(),
+            original_form_section: None,
             assignee_dropdown_index: 0,
             section_dropdown_index: 0,
             access_token_input: String::new(),
@@ -1382,6 +1393,36 @@ impl State {
         self.form_section.as_ref()
     }
 
+    /// Get original form name (for change detection).
+    ///
+    pub fn get_original_form_name(&self) -> &str {
+        &self.original_form_name
+    }
+
+    /// Get original form notes (for change detection).
+    ///
+    pub fn get_original_form_notes(&self) -> &str {
+        &self.original_form_notes
+    }
+
+    /// Get original form assignee (for change detection).
+    ///
+    pub fn get_original_form_assignee(&self) -> &Option<String> {
+        &self.original_form_assignee
+    }
+
+    /// Get original form due date (for change detection).
+    ///
+    pub fn get_original_form_due_on(&self) -> &str {
+        &self.original_form_due_on
+    }
+
+    /// Get original form section (for change detection).
+    ///
+    pub fn get_original_form_section(&self) -> &Option<String> {
+        &self.original_form_section
+    }
+
     /// Set form section.
     ///
     pub fn set_form_section(&mut self, section: Option<String>) -> &mut Self {
@@ -1395,6 +1436,24 @@ impl State {
 
     pub fn set_assignee_dropdown_index(&mut self, index: usize) -> &mut Self {
         self.assignee_dropdown_index = index;
+        self
+    }
+
+    /// Initialize assignee dropdown index to match currently selected assignee (if any).
+    /// This ensures the selected assignee is shown when entering the dropdown.
+    pub fn init_assignee_dropdown_index(&mut self) -> &mut Self {
+        if let Some(selected_gid) = &self.form_assignee {
+            let filtered_users = self.get_filtered_assignees();
+            if let Some(index) = filtered_users.iter().position(|u| &u.gid == selected_gid) {
+                self.assignee_dropdown_index = index;
+            } else {
+                // Selected assignee not in filtered list, reset to 0
+                self.assignee_dropdown_index = 0;
+            }
+        } else {
+            // No assignee selected, start at 0
+            self.assignee_dropdown_index = 0;
+        }
         self
     }
 
@@ -1476,6 +1535,23 @@ impl State {
         self
     }
 
+    /// Initialize section dropdown index to match currently selected section (if any).
+    /// This ensures the selected section is shown when entering the dropdown.
+    pub fn init_section_dropdown_index(&mut self) -> &mut Self {
+        if let Some(selected_gid) = &self.form_section {
+            if let Some(index) = self.sections.iter().position(|s| &s.gid == selected_gid) {
+                self.section_dropdown_index = index;
+            } else {
+                // Selected section not in list, reset to 0
+                self.section_dropdown_index = 0;
+            }
+        } else {
+            // No section selected, start at 0
+            self.section_dropdown_index = 0;
+        }
+        self
+    }
+
     pub fn next_section(&mut self) -> &mut Self {
         let max = self.sections.len();
         if max > 0 {
@@ -1522,11 +1598,18 @@ impl State {
     ///
     #[allow(dead_code)]
     pub fn init_edit_form(&mut self, task: &Task) -> &mut Self {
+        // Set current form values
         self.form_name = task.name.clone();
         self.form_notes = task.notes.clone().unwrap_or_default();
         self.form_assignee = task.assignee.as_ref().map(|u| u.gid.clone());
         self.form_due_on = task.due_on.clone().unwrap_or_default();
         self.form_section = task.section.as_ref().map(|s| s.gid.clone());
+        // Store original values for change detection
+        self.original_form_name = task.name.clone();
+        self.original_form_notes = task.notes.clone().unwrap_or_default();
+        self.original_form_assignee = task.assignee.as_ref().map(|u| u.gid.clone());
+        self.original_form_due_on = task.due_on.clone().unwrap_or_default();
+        self.original_form_section = task.section.as_ref().map(|s| s.gid.clone());
         self.edit_form_state = Some(EditFormState::Name);
         self
     }

@@ -455,6 +455,13 @@ impl<'a> Handler<'a> {
         completed: Option<bool>,
     ) -> Result<()> {
         info!("Updating task fields for {}...", gid);
+        debug!("UpdateTaskFields parameters:");
+        debug!("  name: {:?} (len: {})", name.as_ref().map(|s| if s.len() > 50 { format!("{}...", &s[..50]) } else { s.clone() }), name.as_ref().map(|s| s.len()).unwrap_or(0));
+        debug!("  notes: {:?} (len: {})", notes.as_ref().map(|s| if s.len() > 50 { format!("{}...", &s[..50]) } else { s.clone() }), notes.as_ref().map(|s| s.len()).unwrap_or(0));
+        debug!("  assignee: {:?}", assignee);
+        debug!("  due_on: {:?}", due_on);
+        debug!("  section: {:?}", section);
+        debug!("  completed: {:?}", completed);
         self.asana.update_task_fields(
             &gid,
             name.as_deref(),

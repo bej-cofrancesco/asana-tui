@@ -448,6 +448,7 @@ impl Handler {
                             }
                             Some(crate::state::EditFormState::Notes) => {
                                 state.set_edit_form_state(Some(crate::state::EditFormState::Assignee));
+                                state.init_assignee_dropdown_index();
                             }
                             Some(crate::state::EditFormState::Assignee) => {
                                 // Select the current assignee and move to next field
@@ -456,6 +457,7 @@ impl Handler {
                             }
                             Some(crate::state::EditFormState::DueDate) => {
                                 state.set_edit_form_state(Some(crate::state::EditFormState::Section));
+                                state.init_section_dropdown_index();
                             }
                             Some(crate::state::EditFormState::Section) => {
                                 // Submit form
@@ -481,21 +483,74 @@ impl Handler {
                                         }
                                     }
                                 } else if matches!(state.current_view(), crate::state::View::EditTask) {
-                                    // Update task
+                                    // Update task - only send fields that have changed
                                     if let Some(task) = state.get_task_detail() {
                                         let name = state.get_form_name().to_string();
                                         if !name.trim().is_empty() {
+                                            // Compare current values with original values
+                                            let original_name = state.get_original_form_name();
+                                            let original_notes = state.get_original_form_notes();
+                                            let original_assignee = state.get_original_form_assignee();
+                                            let original_due_on = state.get_original_form_due_on();
+                                            let original_section = state.get_original_form_section();
+                                            
+                                            let current_name = state.get_form_name();
+                                            let current_notes = state.get_form_notes();
+                                            let current_assignee = state.get_form_assignee();
+                                            let current_due_on = state.get_form_due_on();
+                                            let current_section = state.get_form_section();
+                                            
+                                            // Build update fields, only including changed non-empty values
+                                            let mut name_val = None;
+                                            if current_name != original_name && !current_name.trim().is_empty() {
+                                                name_val = Some(current_name.to_string());
+                                            }
+                                            
+                                            let mut notes_val = None;
+                                            if current_notes != original_notes && !current_notes.trim().is_empty() {
+                                                notes_val = Some(current_notes.to_string());
+                                            }
+                                            
+                                            let mut assignee_val = None;
+                                            {
+                                                let current = current_assignee.as_ref();
+                                                let original = original_assignee.as_ref();
+                                                match (current, original) {
+                                                    (Some(a), Some(b)) if a.as_str() == b.as_str() => {},
+                                                    (None, None) => {},
+                                                    (Some(gid), _) if !gid.trim().is_empty() => {
+                                                        assignee_val = Some(gid.to_string());
+                                                    },
+                                                    _ => {},
+                                                }
+                                            }
+                                            
+                                            let mut due_on_val = None;
+                                            if current_due_on != original_due_on && !current_due_on.trim().is_empty() {
+                                                due_on_val = Some(current_due_on.to_string());
+                                            }
+                                            
+                                            let mut section_val = None;
+                                            {
+                                                let current = current_section.as_ref();
+                                                let original = original_section.as_ref();
+                                                match (current, original) {
+                                                    (Some(a), Some(b)) if a.as_str() == b.as_str() => {},
+                                                    (None, None) => {},
+                                                    (Some(gid), _) if !gid.trim().is_empty() => {
+                                                        section_val = Some(gid.to_string());
+                                                    },
+                                                    _ => {},
+                                                }
+                                            }
+                                            
                                             state.dispatch(crate::events::network::Event::UpdateTaskFields {
                                                 gid: task.gid.clone(),
-                                                name: Some(name),
-                                                notes: Some(state.get_form_notes().to_string()),
-                                                assignee: state.get_form_assignee().cloned(),
-                                                due_on: if state.get_form_due_on().is_empty() {
-                                                    None
-                                                } else {
-                                                    Some(state.get_form_due_on().to_string())
-                                                },
-                                                section: state.get_form_section().cloned(),
+                                                name: name_val,
+                                                notes: notes_val,
+                                                assignee: assignee_val,
+                                                due_on: due_on_val,
+                                                section: section_val,
                                                 completed: None,
                                             });
                                             state.clear_form();
@@ -868,6 +923,12 @@ impl Handler {
                                 None => crate::state::EditFormState::Name,
                             };
                             state.set_edit_form_state(Some(next_state));
+                            // Initialize dropdown indices when entering assignee or section fields
+                            if matches!(next_state, crate::state::EditFormState::Assignee) {
+                                state.init_assignee_dropdown_index();
+                            } else if matches!(next_state, crate::state::EditFormState::Section) {
+                                state.init_section_dropdown_index();
+                            }
                         }
                     }
                 }
@@ -886,6 +947,12 @@ impl Handler {
                                 None => crate::state::EditFormState::Name,
                             };
                             state.set_edit_form_state(Some(prev_state));
+                            // Initialize dropdown indices when entering assignee or section fields
+                            if matches!(prev_state, crate::state::EditFormState::Assignee) {
+                                state.init_assignee_dropdown_index();
+                            } else if matches!(prev_state, crate::state::EditFormState::Section) {
+                                state.init_section_dropdown_index();
+                            }
                         }
                     }
                 }

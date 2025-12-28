@@ -81,7 +81,7 @@ fn render_onboarding(frame: &mut Frame, size: Rect, state: &State) {
         .borders(Borders::ALL)
         .title("Welcome to Asana TUI - Setup")
         .border_style(Style::default().fg(Color::Cyan));
-    
+
     frame.render_widget(block, size);
 
     // Split screen into sections
@@ -104,15 +104,14 @@ fn render_onboarding(frame: &mut Frame, size: Rect, state: &State) {
 
     // Instructions
     let mut instructions_text = ONBOARDING_INSTRUCTIONS.to_string();
-    
+
     // Add error message if present
     if let Some(error) = state.get_auth_error() {
         instructions_text.push_str("\n\n");
-        instructions_text.push_str("❌ ERROR: ");
         instructions_text.push_str(error);
         instructions_text.push_str("\n\nPlease check your token and try again.");
     }
-    
+
     let instructions = Paragraph::new(instructions_text)
         .style(if state.get_auth_error().is_some() {
             Style::default().fg(Color::White)
