@@ -1574,12 +1574,7 @@ impl State {
 
     pub fn select_current_section(&mut self) -> &mut Self {
         if let Some(section) = self.sections.get(self.section_dropdown_index) {
-            info!(
-                "Selecting section: {} (GID: {}) at index {}",
-                section.name, section.gid, self.section_dropdown_index
-            );
             self.form_section = Some(section.gid.clone());
-            info!("form_section is now: {:?}", self.form_section);
         } else {
             warn!("No section found at index {}", self.section_dropdown_index);
         }

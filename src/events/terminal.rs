@@ -724,7 +724,6 @@ impl Handler {
                         state.add_search_char('s');
                     } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
                         // Submit form
-                        debug!("Submitting form...");
                         // Make sure section is selected if we're in the section field - do this first
                         let is_section_field = matches!(state.get_edit_form_state(), Some(crate::state::EditFormState::Section));
                         if is_section_field {
@@ -828,8 +827,6 @@ impl Handler {
                                 // If only section changed, UpdateTaskFields will handle it via add_task_to_section
                                 // without sending a PUT request (handled in asana/mod.rs)
                                 if has_other_changes || section_val.is_some() {
-                                    info!("Changes detected, dispatching update with fields: name={:?}, notes={:?}, assignee={:?}, due_on={:?}, section={:?}", 
-                                        name_val.is_some(), notes_val.is_some(), assignee_val.is_some(), due_on_val.is_some(), section_val.is_some());
                                     state.dispatch(crate::events::network::Event::UpdateTaskFields {
                                         gid: task_gid,
                                         name: name_val,
@@ -839,8 +836,6 @@ impl Handler {
                                         section: section_val,
                                         completed: None,
                                     });
-                                } else {
-                                    info!("No changes detected, skipping update");
                                 }
                                 
                                 state.clear_form();

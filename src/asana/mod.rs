@@ -613,14 +613,10 @@ impl Asana {
             "data": data
         });
 
-        info!("📤 Creating task with body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
-
         let response = self
             .client
             .call_with_body::<TaskModel>(reqwest::Method::POST, None, None, Some(body))
             .await?;
-
-        info!("📥 Response status: {}", response.status());
 
         // Check response status before trying to deserialize
         if !response.status().is_success() {
@@ -629,18 +625,7 @@ impl Asana {
             anyhow::bail!("Failed to create task: {}", error_text);
         }
 
-        // Read response body to see what we got
-        let response_text = response.text().await?;
-        info!("📥 Response body: {}", response_text);
-
-        // Try to deserialize
-        let model: Wrapper<TaskModel> = match serde_json::from_str(&response_text) {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Failed to deserialize create task response: {}. Response: {}", e, response_text);
-                anyhow::bail!("Failed to deserialize create task response: {}. Response: {}", e, response_text);
-            }
-        };
+        let model: Wrapper<TaskModel> = response.json().await?;
 
         // If section is specified, add task to that section
         if let Some(section_gid) = section {
@@ -682,8 +667,8 @@ impl Asana {
 
         // Include all fields we might send in the update
         // Note: section is NOT included here because it's handled via a separate endpoint
-        model!(TaskModel "tasks" { 
-            name: String, 
+        model!(TaskModel "tasks" {
+            name: String,
             completed: bool,
             notes: Option<String>,
             assignee: Option<String>,
@@ -698,7 +683,6 @@ impl Asana {
             let trimmed = name_val.trim();
             if !trimmed.is_empty() {
                 data["name"] = serde_json::Value::String(trimmed.to_string());
-                info!("Adding name field: '{}'", trimmed);
             } else {
                 warn!("Skipping empty name field");
             }
@@ -707,16 +691,17 @@ impl Asana {
             let trimmed = notes_val.trim();
             if !trimmed.is_empty() {
                 data["notes"] = serde_json::Value::String(trimmed.to_string());
-                info!("Adding notes field (length: {})", trimmed.len());
             } else {
-                warn!("Skipping empty notes field (original length: {})", notes_val.len());
+                warn!(
+                    "Skipping empty notes field (original length: {})",
+                    notes_val.len()
+                );
             }
         }
         if let Some(assignee_val) = assignee {
             let trimmed = assignee_val.trim();
             if !trimmed.is_empty() {
                 data["assignee"] = serde_json::Value::String(trimmed.to_string());
-                info!("Adding assignee field: '{}'", trimmed);
             } else {
                 warn!("Skipping empty assignee field");
             }
@@ -725,37 +710,30 @@ impl Asana {
             let trimmed = due_on_val.trim();
             if !trimmed.is_empty() {
                 data["due_on"] = serde_json::Value::String(trimmed.to_string());
-                info!("Adding due_on field: '{}'", trimmed);
             } else {
                 warn!("Skipping empty due_on field");
             }
         }
         if let Some(completed_val) = completed {
             data["completed"] = serde_json::Value::Bool(completed_val);
-            info!("Adding completed field: {}", completed_val);
         }
 
-        // Debug: log what we're sending
-        info!("Updating task with data: {:?}", data);
-        info!("Data object keys: {:?}", data.as_object().map(|o| o.keys().collect::<Vec<_>>()));
-        
         // If only section changed, skip the PUT request and just move the section
-        let has_section_only = section.is_some() 
-            && name.is_none() 
-            && notes.is_none() 
-            && assignee.is_none() 
-            && due_on.is_none() 
+        let has_section_only = section.is_some()
+            && name.is_none()
+            && notes.is_none()
+            && assignee.is_none()
+            && due_on.is_none()
             && completed.is_none();
-        
+
         if has_section_only {
-            info!("Only section changed, skipping PUT request and handling section move separately");
             // Just move the section, no PUT request needed
             if let Some(section_gid) = section {
                 self.add_task_to_section(task_gid, section_gid).await?;
             }
             return self.get_task(task_gid).await;
         }
-        
+
         // Ensure we have at least one field to update
         if let Some(obj) = data.as_object() {
             if obj.is_empty() {
@@ -772,31 +750,29 @@ impl Asana {
         // Final validation: ensure no empty string values in data
         if let Some(obj) = data.as_object_mut() {
             let mut removed_fields = Vec::new();
-            obj.retain(|key, value| {
-                match value {
-                    serde_json::Value::String(s) => {
-                        if s.trim().is_empty() {
-                            removed_fields.push(key.clone());
-                            error!("⚠️ REMOVING EMPTY STRING FIELD: {} (value: '{:?}')", key, s);
-                            false
-                        } else {
-                            info!("✓ Keeping field: {} = '{}' (len: {})", key, if s.len() > 50 { format!("{}...", &s[..50]) } else { s.clone() }, s.len());
-                            true
-                        }
-                    }
-                    serde_json::Value::Null => {
+            obj.retain(|key, value| match value {
+                serde_json::Value::String(s) => {
+                    if s.trim().is_empty() {
                         removed_fields.push(key.clone());
-                        error!("⚠️ REMOVING NULL FIELD: {}", key);
+                        error!("⚠️ REMOVING EMPTY STRING FIELD: {} (value: '{:?}')", key, s);
                         false
-                    }
-                    _ => {
-                        info!("✓ Keeping non-string field: {} = {:?}", key, value);
+                    } else {
                         true
                     }
                 }
+                serde_json::Value::Null => {
+                    removed_fields.push(key.clone());
+                    error!("⚠️ REMOVING NULL FIELD: {}", key);
+                    false
+                }
+                _ => true,
             });
             if !removed_fields.is_empty() {
-                error!("❌ Removed {} empty/null fields: {:?}", removed_fields.len(), removed_fields);
+                error!(
+                    "❌ Removed {} empty/null fields: {:?}",
+                    removed_fields.len(),
+                    removed_fields
+                );
             }
         }
 
@@ -804,39 +780,10 @@ impl Asana {
             "data": data
         });
 
-        info!("📤 Final request body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
-        
-        // Log field order to help identify which field is [1]
-        if let Some(obj) = body.get("data").and_then(|d| d.as_object()) {
-            let field_order: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
-            info!("📋 Field order in request: {:?}", field_order);
-            for (idx, key) in field_order.iter().enumerate() {
-                if let Some(val) = obj.get(*key) {
-                    let display_val = if let Some(s) = val.as_str() {
-                        if s.trim().is_empty() {
-                            format!("⚠️ EMPTY STRING (len: {})", s.len())
-                        } else if s.len() > 30 { 
-                            format!("{}... (len: {})", &s[..30], s.len()) 
-                        } else { 
-                            format!("'{}'", s) 
-                        }
-                    } else {
-                        format!("{:?}", val)
-                    };
-                    info!("  [{}] {} = {}", idx, key, display_val);
-                }
-            }
-        }
-
-        // Log the full URL that will be called (including opt_fields)
-        info!("🔗 About to call PUT /tasks/{} with opt_fields from model", task_gid);
-        
         let response = self
             .client
             .call_with_body::<TaskModel>(reqwest::Method::PUT, Some(task_gid), None, Some(body))
             .await?;
-        
-        info!("📥 Response status: {}", response.status());
 
         // Check response status
         if !response.status().is_success() {
@@ -856,27 +803,32 @@ impl Asana {
     /// Add a task to a section (move task in kanban).
     ///
     pub async fn add_task_to_section(&mut self, task_gid: &str, section_gid: &str) -> Result<()> {
-        info!("Moving task {} to section {}...", task_gid, section_gid);
+        debug!("Moving task {} to section {}...", task_gid, section_gid);
 
         // Get the project GID from the task's memberships
-        
+
         // Get the project GID from the task's memberships
         // We need to fetch the task with memberships.project included
         let opt_fields = "resource_type,memberships.project.gid,memberships.section.gid";
         let uri = format!("tasks/{}?opt_fields={}", task_gid, opt_fields);
         let request_url = format!("{}/{}", self.client.base_url, uri);
-        
+
         let response = self
             .client
             .http_client
             .get(&request_url)
-            .header("Authorization", format!("Bearer {}", self.client.access_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.client.access_token),
+            )
             .send()
             .await?;
-        
+
         let task_json: serde_json::Value = response.json().await?;
-        let task_data = task_json.get("data").ok_or_else(|| anyhow::anyhow!("No data in response"))?;
-        
+        let task_data = task_json
+            .get("data")
+            .ok_or_else(|| anyhow::anyhow!("No data in response"))?;
+
         // Extract project GID from memberships
         let project_gid = task_data
             .get("memberships")
@@ -886,7 +838,7 @@ impl Asana {
             .and_then(|p| p.as_object())
             .and_then(|p| p.get("gid"))
             .and_then(|g| g.as_str());
-        
+
         let current_section_gid = task_data
             .get("memberships")
             .and_then(|m| m.as_array())
@@ -895,20 +847,23 @@ impl Asana {
             .and_then(|s| s.as_object())
             .and_then(|s| s.get("gid"))
             .and_then(|g| g.as_str());
-        
-        info!("Current section: {:?}, Target section: {}", current_section_gid, section_gid);
-        
+
+        info!(
+            "Current section: {:?}, Target section: {}",
+            current_section_gid, section_gid
+        );
+
         // If the task is already in the target section, no need to move
         if current_section_gid == Some(section_gid) {
             info!("Task is already in the target section, no move needed");
             return Ok(());
         }
-        
+
         // Use POST /tasks/{task_gid}/addProject with section specified
         // This is the recommended way to move a task to a different section
         // According to Asana API docs, this will move the task to the new section
         let project_gid = project_gid.ok_or_else(|| anyhow::anyhow!("Task is not in a project"))?;
-        
+
         let body = serde_json::json!({
             "data": {
                 "project": project_gid,
@@ -916,37 +871,28 @@ impl Asana {
             }
         });
 
-        let url = format!(
-            "{}/tasks/{}/addProject",
-            self.client.base_url,
-            task_gid
-        );
-        
-        info!("🔗 Calling POST {}", url);
-        info!("📤 Request body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
-        
+        let url = format!("{}/tasks/{}/addProject", self.client.base_url, task_gid);
+
         let response = self
             .client
             .http_client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.client.access_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.client.access_token),
+            )
             .json(&body)
             .send()
             .await?;
 
         let status = response.status();
-        info!("📥 Response status: {}", status);
-
-        // Read the response body to see what we got
-        let response_text = response.text().await?;
-        info!("📥 Response body: {}", response_text);
 
         if !status.is_success() {
-            error!("Failed to move task to section: {}", response_text);
-            anyhow::bail!("Failed to move task to section: {}", response_text);
+            let error_text = response.text().await?;
+            error!("Failed to move task to section: {}", error_text);
+            anyhow::bail!("Failed to move task to section: {}", error_text);
         }
 
-        info!("✓ Task moved to section successfully");
         Ok(())
     }
 

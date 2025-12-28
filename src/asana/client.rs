@@ -244,7 +244,7 @@ impl Client {
             );
             format!("{}?opt_fields={}", uri, opts)
         };
-        
+
         if let Some(params) = params {
             let separator = if uri.contains('?') { "&" } else { "?" };
             for param in params.iter() {
@@ -252,9 +252,6 @@ impl Client {
             }
         }
         let request_url = format!("{}/{}", &self.base_url, uri);
-
-        // Log the full URL for debugging
-        log::info!("🌐 Full request URL: {}", request_url);
 
         // Make request
         let mut request = self

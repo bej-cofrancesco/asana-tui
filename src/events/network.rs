@@ -9,7 +9,9 @@ use tokio::sync::Mutex;
 ///
 #[derive(Debug, Clone)]
 pub enum Event {
-    SetAccessToken { token: String },
+    SetAccessToken {
+        token: String,
+    },
     Me,
     ProjectTasks,
     MyTasks,
@@ -86,24 +88,24 @@ impl<'a> Handler<'a> {
                     // 1. Create new config and load it to set up file path
                     // 2. Save the token which will create the file
                     let mut config = crate::config::Config::new();
-                    
+
                     // Load config first to set up the file path (creates directory if needed)
                     // This is the same logic that was in the original load() method
                     config.load(None)?;
-                    
+
                     // Now save the token - this will create the file using create_file()
                     // This matches the original pattern where after getting the token,
                     // the file would be created immediately
                     config.save_token(token.clone())?;
-                    
+
                     info!("Access token saved to config file successfully.");
-                    
+
                     // Update Asana client with new token
                     *self.asana = crate::asana::Asana::new(&token);
-                    
+
                     // Fetch user data - this may fail if token is invalid
                     self.me().await?;
-                    
+
                     // If we get here, authentication succeeded
                     // Update state to mark as authenticated
                     {
@@ -112,16 +114,17 @@ impl<'a> Handler<'a> {
                         state.clear_access_token_input();
                         state.clear_auth_error();
                     }
-                    
+
                     info!("Access token saved and user authenticated.");
                     Ok::<(), anyhow::Error>(())
-                }.await;
+                }
+                .await;
 
                 // Handle errors gracefully
                 if let Err(e) = result {
                     let error_msg = format!("Authentication failed: {}", e);
                     error!("{}", error_msg);
-                    
+
                     // Set error in state but keep has_access_token as false
                     // This allows user to see the error and resubmit
                     {
@@ -130,7 +133,7 @@ impl<'a> Handler<'a> {
                         // Don't set has_access_token to true on error
                         // Don't clear the input so user can edit and resubmit
                     }
-                    
+
                     // Return Ok so the event handler doesn't crash
                     // The error is now stored in state and will be displayed in UI
                     return Ok(());
@@ -143,14 +146,35 @@ impl<'a> Handler<'a> {
             Event::DeleteTask { gid } => self.delete_task(gid).await?,
             Event::RefreshTasks => self.refresh_tasks().await?,
             Event::GetTaskDetail { gid } => self.get_task_detail(gid).await?,
-            Event::GetProjectSections { project_gid } => self.get_project_sections(project_gid).await?,
+            Event::GetProjectSections { project_gid } => {
+                self.get_project_sections(project_gid).await?
+            }
             Event::CreateStory { task_gid, text } => self.create_story(task_gid, text).await?,
-            Event::GetWorkspaceUsers { workspace_gid } => self.get_workspace_users(workspace_gid).await?,
-            Event::CreateTask { project_gid, name, notes, assignee, due_on, section } => {
-                self.create_task(project_gid, name, notes, assignee, due_on, section).await?
-            },
-            Event::UpdateTaskFields { gid, name, notes, assignee, due_on, section, completed } => {
-                self.update_task_fields(gid, name, notes, assignee, due_on, section, completed).await?
+            Event::GetWorkspaceUsers { workspace_gid } => {
+                self.get_workspace_users(workspace_gid).await?
+            }
+            Event::CreateTask {
+                project_gid,
+                name,
+                notes,
+                assignee,
+                due_on,
+                section,
+            } => {
+                self.create_task(project_gid, name, notes, assignee, due_on, section)
+                    .await?
+            }
+            Event::UpdateTaskFields {
+                gid,
+                name,
+                notes,
+                assignee,
+                due_on,
+                section,
+                completed,
+            } => {
+                self.update_task_fields(gid, name, notes, assignee, due_on, section, completed)
+                    .await?
             }
         }
         Ok(())
@@ -203,10 +227,13 @@ impl<'a> Handler<'a> {
         let view_mode;
         {
             let state = self.state.lock().await;
-            include_completed = matches!(state.get_task_filter(), crate::state::TaskFilter::All | crate::state::TaskFilter::Completed);
+            include_completed = matches!(
+                state.get_task_filter(),
+                crate::state::TaskFilter::All | crate::state::TaskFilter::Completed
+            );
             view_mode = state.get_view_mode();
         }
-        
+
         match self
             .asana
             .tasks(&project.gid, workspace_gid.as_deref(), include_completed)
@@ -251,12 +278,20 @@ impl<'a> Handler<'a> {
         let workspace_gid;
         {
             let state = self.state.lock().await;
-            user_gid = state.get_user()
-                .ok_or(anyhow!("User not set. Please wait for authentication to complete."))?
-                .gid.to_owned();
-            workspace_gid = state.get_active_workspace()
-                .ok_or(anyhow!("No active workspace. Please wait for authentication to complete."))?
-                .gid.to_owned();
+            user_gid = state
+                .get_user()
+                .ok_or(anyhow!(
+                    "User not set. Please wait for authentication to complete."
+                ))?
+                .gid
+                .to_owned();
+            workspace_gid = state
+                .get_active_workspace()
+                .ok_or(anyhow!(
+                    "No active workspace. Please wait for authentication to complete."
+                ))?
+                .gid
+                .to_owned();
         }
         let my_tasks = self.asana.my_tasks(&user_gid, &workspace_gid).await?;
         let mut state = self.state.lock().await;
@@ -268,7 +303,6 @@ impl<'a> Handler<'a> {
     /// Update a task (e.g., mark as complete/incomplete).
     ///
     async fn update_task(&mut self, task_gid: String, completed: Option<bool>) -> Result<()> {
-        info!("Updating task {}...", task_gid);
         self.asana.update_task(&task_gid, completed).await?;
         info!("Task {} updated successfully.", task_gid);
         // Refresh the current task list
@@ -332,7 +366,7 @@ impl<'a> Handler<'a> {
         }
         Ok(())
     }
-    
+
     /// Get full task details.
     ///
     async fn get_task_detail(&mut self, task_gid: String) -> Result<()> {
@@ -347,7 +381,7 @@ impl<'a> Handler<'a> {
         info!("Task details loaded successfully.");
         Ok(())
     }
-    
+
     /// Get project sections for kanban board.
     ///
     async fn get_project_sections(&mut self, project_gid: String) -> Result<()> {
@@ -358,7 +392,7 @@ impl<'a> Handler<'a> {
         info!("Sections loaded successfully.");
         Ok(())
     }
-    
+
     /// Get task stories/comments.
     ///
     async fn get_task_stories(&mut self, task_gid: String) -> Result<()> {
@@ -369,7 +403,7 @@ impl<'a> Handler<'a> {
         info!("Stories/comments loaded successfully.");
         Ok(())
     }
-    
+
     /// Create a story/comment on a task.
     ///
     async fn create_story(&mut self, task_gid: String, text: String) -> Result<()> {
@@ -380,7 +414,7 @@ impl<'a> Handler<'a> {
         info!("Comment created successfully.");
         Ok(())
     }
-    
+
     /// Get workspace users.
     ///
     async fn get_workspace_users(&mut self, workspace_gid: String) -> Result<()> {
@@ -391,7 +425,7 @@ impl<'a> Handler<'a> {
         info!("Users loaded successfully.");
         Ok(())
     }
-    
+
     /// Create a new task.
     ///
     async fn create_task(
@@ -404,17 +438,23 @@ impl<'a> Handler<'a> {
         section: Option<String>,
     ) -> Result<()> {
         info!("Creating new task '{}' in project {}...", name, project_gid);
-        let task = self.asana.create_task(
-            &project_gid,
-            &name,
-            notes.as_deref(),
-            assignee.as_deref(),
-            due_on.as_deref(),
-            section.as_deref(),
-        ).await?;
-        
-        info!("Task '{}' created successfully with GID {}", task.name, task.gid);
-        
+        let task = self
+            .asana
+            .create_task(
+                &project_gid,
+                &name,
+                notes.as_deref(),
+                assignee.as_deref(),
+                due_on.as_deref(),
+                section.as_deref(),
+            )
+            .await?;
+
+        info!(
+            "Task '{}' created successfully with GID {}",
+            task.name, task.gid
+        );
+
         // Refresh tasks after creating - need to get project from state
         let project_gid_for_refresh;
         {
@@ -426,10 +466,10 @@ impl<'a> Handler<'a> {
                 project_gid_for_refresh = project_gid.clone();
             }
         }
-        
+
         // Refresh the project tasks
         self.project_tasks().await?;
-        
+
         // If in kanban mode, also refresh sections
         {
             let state = self.state.lock().await;
@@ -438,10 +478,10 @@ impl<'a> Handler<'a> {
                 self.get_project_sections(project_gid_for_refresh).await?;
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Update task fields.
     ///
     async fn update_task_fields(
@@ -454,23 +494,17 @@ impl<'a> Handler<'a> {
         section: Option<String>,
         completed: Option<bool>,
     ) -> Result<()> {
-        info!("Updating task fields for {}...", gid);
-        debug!("UpdateTaskFields parameters:");
-        debug!("  name: {:?} (len: {})", name.as_ref().map(|s| if s.len() > 50 { format!("{}...", &s[..50]) } else { s.clone() }), name.as_ref().map(|s| s.len()).unwrap_or(0));
-        debug!("  notes: {:?} (len: {})", notes.as_ref().map(|s| if s.len() > 50 { format!("{}...", &s[..50]) } else { s.clone() }), notes.as_ref().map(|s| s.len()).unwrap_or(0));
-        debug!("  assignee: {:?}", assignee);
-        debug!("  due_on: {:?}", due_on);
-        debug!("  section: {:?}", section);
-        debug!("  completed: {:?}", completed);
-        self.asana.update_task_fields(
-            &gid,
-            name.as_deref(),
-            notes.as_deref(),
-            assignee.as_deref(),
-            due_on.as_deref(),
-            section.as_deref(),
-            completed,
-        ).await?;
+        self.asana
+            .update_task_fields(
+                &gid,
+                name.as_deref(),
+                notes.as_deref(),
+                assignee.as_deref(),
+                due_on.as_deref(),
+                section.as_deref(),
+                completed,
+            )
+            .await?;
         // Refresh task detail if we're viewing it
         let view;
         let task_gid_to_refresh;
@@ -498,12 +532,13 @@ impl<'a> Handler<'a> {
         info!("Task updated successfully.");
         Ok(())
     }
-    
+
     /// Move task to a different section.
     ///
     async fn move_task_to_section(&mut self, task_gid: String, section_gid: String) -> Result<()> {
-        info!("Moving task {} to section {}...", task_gid, section_gid);
-        self.asana.add_task_to_section(&task_gid, &section_gid).await?;
+        self.asana
+            .add_task_to_section(&task_gid, &section_gid)
+            .await?;
         // Refresh tasks after moving
         self.project_tasks().await?;
         info!("Task moved successfully.");
