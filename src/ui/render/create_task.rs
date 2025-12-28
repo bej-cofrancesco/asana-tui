@@ -52,14 +52,22 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &State) {
         form_state == EditFormState::Name,
     );
 
-    // Notes field
-    render_field(
-        frame,
-        form_chunks[1],
-        "Notes",
-        state.get_form_notes(),
-        form_state == EditFormState::Notes,
-    );
+    // Notes field - wrap text properly
+    if form_state == EditFormState::Notes {
+        render_notes_field(
+            frame,
+            form_chunks[1],
+            state.get_form_notes(),
+            true,
+        );
+    } else {
+        render_notes_field(
+            frame,
+            form_chunks[1],
+            state.get_form_notes(),
+            false,
+        );
+    }
 
     // Assignee field - show dropdown if focused
     if form_state == EditFormState::Assignee {
@@ -162,13 +170,84 @@ fn render_field(
     frame.render_widget(paragraph, size);
 }
 
+fn render_notes_field(
+    frame: &mut Frame,
+    size: Rect,
+    value: &str,
+    is_selected: bool,
+) {
+    use tui::widgets::Wrap;
+    
+    let border_style = if is_selected {
+        styling::active_block_border_style()
+    } else {
+        styling::normal_block_border_style()
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Notes")
+        .border_style(border_style);
+
+    let display_value = if value.is_empty() {
+        "Enter notes..."
+    } else {
+        value
+    };
+
+    let text_style = if is_selected {
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        styling::normal_text_style()
+    };
+
+    let text = if is_selected {
+        Spans::from(vec![
+            Span::styled(display_value, text_style),
+            Span::styled("█", Style::default().fg(Color::Cyan)), // Cursor
+        ])
+    } else {
+        Spans::from(vec![Span::styled(display_value, text_style)])
+    };
+
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, size);
+}
+
 fn render_assignee_dropdown(frame: &mut Frame, size: Rect, state: &State) {
     use tui::widgets::{List, ListItem};
+    use tui::layout::Layout;
+    use tui::layout::Constraint;
+    use tui::layout::Direction;
     
-    let users = state.get_workspace_users();
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Search input
+            Constraint::Min(1),   // List
+        ])
+        .split(size);
+    
+    // Search input
+    let search_text = state.get_assignee_search();
+    let search_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Search Assignee")
+        .border_style(styling::active_block_border_style());
+    let search_para = Paragraph::new(format!("> {}", search_text))
+        .block(search_block)
+        .style(styling::normal_text_style());
+    frame.render_widget(search_para, chunks[0]);
+    
+    // Filtered users list
+    let filtered_users = state.get_filtered_assignees();
     let selected_index = state.get_assignee_dropdown_index();
     
-    let items: Vec<ListItem> = users
+    let items: Vec<ListItem> = filtered_users
         .iter()
         .enumerate()
         .map(|(i, user)| {
@@ -180,7 +259,12 @@ fn render_assignee_dropdown(frame: &mut Frame, size: Rect, state: &State) {
             } else {
                 styling::normal_text_style()
             };
-            ListItem::new(Spans::from(Span::styled(&user.name, style)))
+            let display_text = if !user.email.is_empty() {
+                format!("{} ({})", user.name, user.email)
+            } else {
+                user.name.clone()
+            };
+            ListItem::new(Spans::from(Span::styled(display_text, style)))
         })
         .collect();
     
@@ -190,7 +274,7 @@ fn render_assignee_dropdown(frame: &mut Frame, size: Rect, state: &State) {
         .border_style(styling::active_block_border_style());
     
     let list = List::new(items).block(block);
-    frame.render_widget(list, size);
+    frame.render_widget(list, chunks[1]);
 }
 
 fn render_section_dropdown(frame: &mut Frame, size: Rect, state: &State) {

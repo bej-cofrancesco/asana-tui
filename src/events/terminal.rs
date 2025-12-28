@@ -71,6 +71,55 @@ impl Handler {
                 } if state.is_comment_input_mode() => {
                     state.add_comment_char(c);
                 }
+                // Handle form input mode - all character keys go to form fields (except h/j/k/l when in dropdowns)
+                KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers: KeyModifiers::NONE,
+                } if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask)
+                    && !matches!(state.get_edit_form_state(), Some(crate::state::EditFormState::Assignee) | Some(crate::state::EditFormState::Section))
+                    && !matches!(c, 'h' | 'j' | 'k' | 'l') => {
+                    // Route to appropriate form field
+                    match state.get_edit_form_state() {
+                        Some(crate::state::EditFormState::Name) => {
+                            state.add_form_name_char(c);
+                        }
+                        Some(crate::state::EditFormState::Notes) => {
+                            state.add_form_notes_char(c);
+                        }
+                        Some(crate::state::EditFormState::DueDate) => {
+                            state.add_form_due_on_char(c);
+                        }
+                        _ => {
+                            // Default to Name field if no field is selected
+                            state.set_edit_form_state(Some(crate::state::EditFormState::Name));
+                            state.add_form_name_char(c);
+                        }
+                    }
+                }
+                KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers: KeyModifiers::SHIFT,
+                } if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask)
+                    && !matches!(state.get_edit_form_state(), Some(crate::state::EditFormState::Assignee) | Some(crate::state::EditFormState::Section))
+                    && !matches!(c, 'H' | 'J' | 'K' | 'L') => {
+                    // Route to appropriate form field
+                    match state.get_edit_form_state() {
+                        Some(crate::state::EditFormState::Name) => {
+                            state.add_form_name_char(c);
+                        }
+                        Some(crate::state::EditFormState::Notes) => {
+                            state.add_form_notes_char(c);
+                        }
+                        Some(crate::state::EditFormState::DueDate) => {
+                            state.add_form_due_on_char(c);
+                        }
+                        _ => {
+                            // Default to Name field if no field is selected
+                            state.set_edit_form_state(Some(crate::state::EditFormState::Name));
+                            state.add_form_name_char(c);
+                        }
+                    }
+                }
                 // Handle token input in onboarding - all character keys go to token input
                 // Clear error when user starts typing
                 KeyEvent {
@@ -639,8 +688,9 @@ impl Handler {
                         state.add_comment_char('c');
                     } else if matches!(state.current_focus(), Focus::View) {
                         if matches!(state.current_view(), crate::state::View::TaskDetail) {
-                            // Add comment from detail view
+                            // Add comment from detail view - switch to Comments panel first
                             debug!("Processing add comment event '{:?}'...", event);
+                            state.set_current_task_panel(crate::state::TaskDetailPanel::Comments);
                             state.enter_comment_input_mode();
                         }
                     }
@@ -849,22 +899,6 @@ impl Handler {
                     } else if state.is_comment_input_mode() {
                         debug!("Processing comment character '{}' event '{:?}'...", c, event);
                         state.add_comment_char(c);
-                    } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
-                        // Handle form input
-                        match state.get_edit_form_state() {
-                            Some(crate::state::EditFormState::Name) => {
-                                state.add_form_name_char(c);
-                            }
-                            Some(crate::state::EditFormState::Notes) => {
-                                state.add_form_notes_char(c);
-                            }
-                            Some(crate::state::EditFormState::DueDate) => {
-                                state.add_form_due_on_char(c);
-                            }
-                            _ => {
-                                // Assignee and Section are selected via Enter, not typed
-                            }
-                        }
                     } else {
                         debug!("Skipping processing of terminal event '{:?}'...", event);
                     }

@@ -23,6 +23,7 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &State) {
 
         // Header with task name and panel indicators
         let current_panel = state.get_current_task_panel();
+        let is_comment_input = state.is_comment_input_mode();
         let panel_indicators = format!(
             "{} {} {}",
             if current_panel == TaskDetailPanel::Details {
@@ -30,7 +31,7 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &State) {
             } else {
                 " Details "
             },
-            if current_panel == TaskDetailPanel::Comments {
+            if current_panel == TaskDetailPanel::Comments || is_comment_input {
                 "[Comments]"
             } else {
                 " Comments "
@@ -62,7 +63,14 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &State) {
         frame.render_widget(name_para, chunks[0]);
 
         // Main content area - show only the active panel
-        match current_panel {
+        // If comment input mode is active, always show Comments panel
+        let panel_to_show = if state.is_comment_input_mode() {
+            TaskDetailPanel::Comments
+        } else {
+            current_panel
+        };
+        
+        match panel_to_show {
             TaskDetailPanel::Details => {
                 render_task_properties(frame, chunks[1], task, state);
             }

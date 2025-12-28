@@ -1021,6 +1021,11 @@ impl State {
         self
     }
 
+    pub fn set_current_task_panel(&mut self, panel: TaskDetailPanel) -> &mut Self {
+        self.current_task_panel = panel;
+        self
+    }
+
     /// Toggle view mode (List/Kanban).
     ///
     #[allow(dead_code)]
