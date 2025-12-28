@@ -223,6 +223,21 @@ impl Handler {
                 } => {
                     if state.is_search_mode() {
                         state.add_search_char('h');
+                    } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask)
+                        && !matches!(state.get_edit_form_state(), Some(crate::state::EditFormState::Assignee) | Some(crate::state::EditFormState::Section)) {
+                        // In form text fields, allow typing 'h'
+                        match state.get_edit_form_state() {
+                            Some(crate::state::EditFormState::Name) => {
+                                state.add_form_name_char('h');
+                            }
+                            Some(crate::state::EditFormState::Notes) => {
+                                state.add_form_notes_char('h');
+                            }
+                            Some(crate::state::EditFormState::DueDate) => {
+                                state.add_form_due_on_char('h');
+                            }
+                            _ => {}
+                        }
                     } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
                         // Navigate to previous panel in task detail view
                         debug!("Processing previous task panel event '{:?}'...", event);
@@ -249,6 +264,21 @@ impl Handler {
                 } => {
                     if state.is_search_mode() {
                         state.add_search_char('l');
+                    } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask)
+                        && !matches!(state.get_edit_form_state(), Some(crate::state::EditFormState::Assignee) | Some(crate::state::EditFormState::Section)) {
+                        // In form text fields, allow typing 'l'
+                        match state.get_edit_form_state() {
+                            Some(crate::state::EditFormState::Name) => {
+                                state.add_form_name_char('l');
+                            }
+                            Some(crate::state::EditFormState::Notes) => {
+                                state.add_form_notes_char('l');
+                            }
+                            Some(crate::state::EditFormState::DueDate) => {
+                                state.add_form_due_on_char('l');
+                            }
+                            _ => {}
+                        }
                     } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
                         // Navigate to next panel in task detail view
                         debug!("Processing next task panel event '{:?}'...", event);
@@ -275,6 +305,21 @@ impl Handler {
                 } => {
                     if state.is_search_mode() {
                         state.add_search_char('k');
+                    } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask)
+                        && !matches!(state.get_edit_form_state(), Some(crate::state::EditFormState::Assignee) | Some(crate::state::EditFormState::Section)) {
+                        // In form text fields, allow typing 'k'
+                        match state.get_edit_form_state() {
+                            Some(crate::state::EditFormState::Name) => {
+                                state.add_form_name_char('k');
+                            }
+                            Some(crate::state::EditFormState::Notes) => {
+                                state.add_form_notes_char('k');
+                            }
+                            Some(crate::state::EditFormState::DueDate) => {
+                                state.add_form_due_on_char('k');
+                            }
+                            _ => {}
+                        }
                     } else if state.is_debug_mode() {
                         debug!("Processing previous debug event '{:?}'...", event);
                         state.previous_debug();
@@ -344,6 +389,21 @@ impl Handler {
                 } => {
                     if state.is_search_mode() {
                         state.add_search_char('j');
+                    } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask)
+                        && !matches!(state.get_edit_form_state(), Some(crate::state::EditFormState::Assignee) | Some(crate::state::EditFormState::Section)) {
+                        // In form text fields, allow typing 'j'
+                        match state.get_edit_form_state() {
+                            Some(crate::state::EditFormState::Name) => {
+                                state.add_form_name_char('j');
+                            }
+                            Some(crate::state::EditFormState::Notes) => {
+                                state.add_form_notes_char('j');
+                            }
+                            Some(crate::state::EditFormState::DueDate) => {
+                                state.add_form_due_on_char('j');
+                            }
+                            _ => {}
+                        }
                     } else if state.is_debug_mode() {
                         debug!("Processing next debug event '{:?}'...", event);
                         state.next_debug();
@@ -460,104 +520,9 @@ impl Handler {
                                 state.init_section_dropdown_index();
                             }
                             Some(crate::state::EditFormState::Section) => {
-                                // Submit form
-                                if matches!(state.current_view(), crate::state::View::CreateTask) {
-                                    // Create task
-                                    if let Some(project) = state.get_project() {
-                                        let name = state.get_form_name().to_string();
-                                        if !name.trim().is_empty() {
-                                            state.dispatch(crate::events::network::Event::CreateTask {
-                                                project_gid: project.gid.clone(),
-                                                name,
-                                                notes: Some(state.get_form_notes().to_string()),
-                                                assignee: state.get_form_assignee().cloned(),
-                                                due_on: if state.get_form_due_on().is_empty() {
-                                                    None
-                                                } else {
-                                                    Some(state.get_form_due_on().to_string())
-                                                },
-                                                section: state.get_form_section().cloned(),
-                                            });
-                                            state.clear_form();
-                                            state.pop_view();
-                                        }
-                                    }
-                                } else if matches!(state.current_view(), crate::state::View::EditTask) {
-                                    // Update task - only send fields that have changed
-                                    if let Some(task) = state.get_task_detail() {
-                                        let name = state.get_form_name().to_string();
-                                        if !name.trim().is_empty() {
-                                            // Compare current values with original values
-                                            let original_name = state.get_original_form_name();
-                                            let original_notes = state.get_original_form_notes();
-                                            let original_assignee = state.get_original_form_assignee();
-                                            let original_due_on = state.get_original_form_due_on();
-                                            let original_section = state.get_original_form_section();
-                                            
-                                            let current_name = state.get_form_name();
-                                            let current_notes = state.get_form_notes();
-                                            let current_assignee = state.get_form_assignee();
-                                            let current_due_on = state.get_form_due_on();
-                                            let current_section = state.get_form_section();
-                                            
-                                            // Build update fields, only including changed non-empty values
-                                            let mut name_val = None;
-                                            if current_name != original_name && !current_name.trim().is_empty() {
-                                                name_val = Some(current_name.to_string());
-                                            }
-                                            
-                                            let mut notes_val = None;
-                                            if current_notes != original_notes && !current_notes.trim().is_empty() {
-                                                notes_val = Some(current_notes.to_string());
-                                            }
-                                            
-                                            let mut assignee_val = None;
-                                            {
-                                                let current = current_assignee.as_ref();
-                                                let original = original_assignee.as_ref();
-                                                match (current, original) {
-                                                    (Some(a), Some(b)) if a.as_str() == b.as_str() => {},
-                                                    (None, None) => {},
-                                                    (Some(gid), _) if !gid.trim().is_empty() => {
-                                                        assignee_val = Some(gid.to_string());
-                                                    },
-                                                    _ => {},
-                                                }
-                                            }
-                                            
-                                            let mut due_on_val = None;
-                                            if current_due_on != original_due_on && !current_due_on.trim().is_empty() {
-                                                due_on_val = Some(current_due_on.to_string());
-                                            }
-                                            
-                                            let mut section_val = None;
-                                            {
-                                                let current = current_section.as_ref();
-                                                let original = original_section.as_ref();
-                                                match (current, original) {
-                                                    (Some(a), Some(b)) if a.as_str() == b.as_str() => {},
-                                                    (None, None) => {},
-                                                    (Some(gid), _) if !gid.trim().is_empty() => {
-                                                        section_val = Some(gid.to_string());
-                                                    },
-                                                    _ => {},
-                                                }
-                                            }
-                                            
-                                            state.dispatch(crate::events::network::Event::UpdateTaskFields {
-                                                gid: task.gid.clone(),
-                                                name: name_val,
-                                                notes: notes_val,
-                                                assignee: assignee_val,
-                                                due_on: due_on_val,
-                                                section: section_val,
-                                                completed: None,
-                                            });
-                                            state.clear_form();
-                                            state.pop_view();
-                                        }
-                                    }
-                                }
+                                // Select the current section and stay in Section field
+                                // User must press 's' to submit or Esc to cancel
+                                state.select_current_section();
                             }
                             None => {
                                 state.set_edit_form_state(Some(crate::state::EditFormState::Name));
@@ -757,6 +722,131 @@ impl Handler {
                     if state.is_search_mode() {
                         debug!("Processing search character 's' event '{:?}'...", event);
                         state.add_search_char('s');
+                    } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
+                        // Submit form
+                        debug!("Submitting form...");
+                        // Make sure section is selected if we're in the section field - do this first
+                        let is_section_field = matches!(state.get_edit_form_state(), Some(crate::state::EditFormState::Section));
+                        if is_section_field {
+                            state.select_current_section();
+                        }
+                        // Now get all the values we need
+                        if matches!(state.current_view(), crate::state::View::CreateTask) {
+                            // Create task
+                            let project_gid_opt = state.get_project().map(|p| p.gid.clone());
+                            let name = state.get_form_name().to_string();
+                            if !name.trim().is_empty() {
+                                if let Some(project_gid) = project_gid_opt {
+                                    let notes = state.get_form_notes().to_string();
+                                    let assignee = state.get_form_assignee().cloned();
+                                    let due_on = if state.get_form_due_on().is_empty() {
+                                        None
+                                    } else {
+                                        Some(state.get_form_due_on().to_string())
+                                    };
+                                    let section = state.get_form_section().cloned();
+                                    state.dispatch(crate::events::network::Event::CreateTask {
+                                        project_gid,
+                                        name,
+                                        notes: Some(notes),
+                                        assignee,
+                                        due_on,
+                                        section,
+                                    });
+                                    state.clear_form();
+                                    state.pop_view();
+                                }
+                            }
+                        } else if matches!(state.current_view(), crate::state::View::EditTask) {
+                            // Update task - only send fields that have changed
+                            let task_gid_opt = state.get_task_detail().map(|t| t.gid.clone());
+                            if let Some(task_gid) = task_gid_opt {
+                                // Compare current values with original values - clone all values first
+                                let original_name = state.get_original_form_name().to_string();
+                                let original_notes = state.get_original_form_notes().to_string();
+                                let original_assignee = state.get_original_form_assignee().clone();
+                                let original_due_on = state.get_original_form_due_on().to_string();
+                                let original_section = state.get_original_form_section().clone();
+                                
+                                let current_name = state.get_form_name().to_string();
+                                let current_notes = state.get_form_notes().to_string();
+                                let current_assignee = state.get_form_assignee().cloned();
+                                let current_due_on = state.get_form_due_on().to_string();
+                                let current_section = state.get_form_section().cloned();
+                                
+                                // Build update fields, only including changed non-empty values
+                                let mut name_val = None;
+                                if current_name != original_name && !current_name.trim().is_empty() {
+                                    name_val = Some(current_name);
+                                }
+                                
+                                let mut notes_val = None;
+                                if current_notes != original_notes && !current_notes.trim().is_empty() {
+                                    notes_val = Some(current_notes);
+                                }
+                                
+                                let mut assignee_val = None;
+                                {
+                                    let current = current_assignee.as_ref();
+                                    let original = original_assignee.as_ref();
+                                    match (current, original) {
+                                        (Some(a), Some(b)) if a.as_str() == b.as_str() => {},
+                                        (None, None) => {},
+                                        (Some(gid), _) if !gid.trim().is_empty() => {
+                                            assignee_val = Some(gid.clone());
+                                        },
+                                        _ => {},
+                                    }
+                                }
+                                
+                                let mut due_on_val = None;
+                                if current_due_on != original_due_on && !current_due_on.trim().is_empty() {
+                                    due_on_val = Some(current_due_on);
+                                }
+                                
+                                let mut section_val = None;
+                                {
+                                    let current = current_section.as_ref();
+                                    let original = original_section.as_ref();
+                                    match (current, original) {
+                                        (Some(a), Some(b)) if a.as_str() == b.as_str() => {},
+                                        (None, None) => {},
+                                        (Some(gid), _) if !gid.trim().is_empty() => {
+                                            section_val = Some(gid.clone());
+                                        },
+                                        _ => {},
+                                    }
+                                }
+                                
+                                // Check if any field has changed
+                                let has_other_changes = name_val.is_some() 
+                                    || notes_val.is_some() 
+                                    || assignee_val.is_some() 
+                                    || due_on_val.is_some();
+                                
+                                // Only dispatch if there are actual changes
+                                // If only section changed, UpdateTaskFields will handle it via add_task_to_section
+                                // without sending a PUT request (handled in asana/mod.rs)
+                                if has_other_changes || section_val.is_some() {
+                                    info!("Changes detected, dispatching update with fields: name={:?}, notes={:?}, assignee={:?}, due_on={:?}, section={:?}", 
+                                        name_val.is_some(), notes_val.is_some(), assignee_val.is_some(), due_on_val.is_some(), section_val.is_some());
+                                    state.dispatch(crate::events::network::Event::UpdateTaskFields {
+                                        gid: task_gid,
+                                        name: name_val,
+                                        notes: notes_val,
+                                        assignee: assignee_val,
+                                        due_on: due_on_val,
+                                        section: section_val,
+                                        completed: None,
+                                    });
+                                } else {
+                                    info!("No changes detected, skipping update");
+                                }
+                                
+                                state.clear_form();
+                                state.pop_view();
+                            }
+                        }
                     } else {
                         match state.current_focus() {
                             Focus::Menu => {

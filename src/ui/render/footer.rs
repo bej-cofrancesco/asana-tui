@@ -23,7 +23,7 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                 " h/l: switch panel, j/k: scroll, e: edit, d: delete, c: comment, Esc: back, q: quit"
             }
             crate::state::View::CreateTask | crate::state::View::EditTask => {
-                " Tab/Shift+Tab: navigate fields, Enter: save, Esc: cancel"
+                " Tab/Shift+Tab: navigate fields, Enter: select, s: submit, Esc: cancel"
             }
             crate::state::View::ProjectTasks => {
                 if state.get_view_mode() == crate::state::ViewMode::Kanban {

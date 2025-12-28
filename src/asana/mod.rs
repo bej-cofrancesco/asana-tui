@@ -717,10 +717,31 @@ impl Asana {
         info!("Updating task with data: {:?}", data);
         info!("Data object keys: {:?}", data.as_object().map(|o| o.keys().collect::<Vec<_>>()));
         
+        // If only section changed, skip the PUT request and just move the section
+        let has_section_only = section.is_some() 
+            && name.is_none() 
+            && notes.is_none() 
+            && assignee.is_none() 
+            && due_on.is_none() 
+            && completed.is_none();
+        
+        if has_section_only {
+            info!("Only section changed, skipping PUT request and handling section move separately");
+            // Just move the section, no PUT request needed
+            if let Some(section_gid) = section {
+                self.add_task_to_section(task_gid, section_gid).await?;
+            }
+            return self.get_task(task_gid).await;
+        }
+        
         // Ensure we have at least one field to update
         if let Some(obj) = data.as_object() {
             if obj.is_empty() {
-                warn!("No fields to update, skipping API call");
+                warn!("⚠️ No fields to update, skipping API call");
+                // If section is specified, handle it separately
+                if let Some(section_gid) = section {
+                    self.add_task_to_section(task_gid, section_gid).await?;
+                }
                 // Return the current task without making an API call
                 return self.get_task(task_gid).await;
             }
@@ -813,24 +834,97 @@ impl Asana {
     /// Add a task to a section (move task in kanban).
     ///
     pub async fn add_task_to_section(&mut self, task_gid: &str, section_gid: &str) -> Result<()> {
-        debug!("Moving task {} to section {}...", task_gid, section_gid);
+        info!("Moving task {} to section {}...", task_gid, section_gid);
 
-        // Create a dummy model for the endpoint
-        model!(DummyModel "sections" { name: String });
-
+        // Get the project GID from the task's memberships
+        
+        // Get the project GID from the task's memberships
+        // We need to fetch the task with memberships.project included
+        let opt_fields = "resource_type,memberships.project.gid,memberships.section.gid";
+        let uri = format!("tasks/{}?opt_fields={}", task_gid, opt_fields);
+        let request_url = format!("{}/{}", self.client.base_url, uri);
+        
+        let response = self
+            .client
+            .http_client
+            .get(&request_url)
+            .header("Authorization", format!("Bearer {}", self.client.access_token))
+            .send()
+            .await?;
+        
+        let task_json: serde_json::Value = response.json().await?;
+        let task_data = task_json.get("data").ok_or_else(|| anyhow::anyhow!("No data in response"))?;
+        
+        // Extract project GID from memberships
+        let project_gid = task_data
+            .get("memberships")
+            .and_then(|m| m.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|m| m.get("project"))
+            .and_then(|p| p.as_object())
+            .and_then(|p| p.get("gid"))
+            .and_then(|g| g.as_str());
+        
+        let current_section_gid = task_data
+            .get("memberships")
+            .and_then(|m| m.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|m| m.get("section"))
+            .and_then(|s| s.as_object())
+            .and_then(|s| s.get("gid"))
+            .and_then(|g| g.as_str());
+        
+        info!("Current section: {:?}, Target section: {}", current_section_gid, section_gid);
+        
+        // If the task is already in the target section, no need to move
+        if current_section_gid == Some(section_gid) {
+            info!("Task is already in the target section, no move needed");
+            return Ok(());
+        }
+        
+        // Use POST /tasks/{task_gid}/addProject with section specified
+        // This is the recommended way to move a task to a different section
+        // According to Asana API docs, this will move the task to the new section
+        let project_gid = project_gid.ok_or_else(|| anyhow::anyhow!("Task is not in a project"))?;
+        
         let body = serde_json::json!({
             "data": {
-                "task": task_gid
+                "project": project_gid,
+                "section": section_gid
             }
         });
 
-        // Use the add task to section endpoint
-        // The endpoint is sections/{section_gid}/addTask
-        let endpoint = format!("sections/{}/addTask", section_gid);
-        self.client
-            .call_with_body::<DummyModel>(reqwest::Method::POST, Some(&endpoint), None, Some(body))
+        let url = format!(
+            "{}/tasks/{}/addProject",
+            self.client.base_url,
+            task_gid
+        );
+        
+        info!("🔗 Calling POST {}", url);
+        info!("📤 Request body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
+        
+        let response = self
+            .client
+            .http_client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.client.access_token))
+            .json(&body)
+            .send()
             .await?;
 
+        let status = response.status();
+        info!("📥 Response status: {}", status);
+
+        // Read the response body to see what we got
+        let response_text = response.text().await?;
+        info!("📥 Response body: {}", response_text);
+
+        if !status.is_success() {
+            error!("Failed to move task to section: {}", response_text);
+            anyhow::bail!("Failed to move task to section: {}", response_text);
+        }
+
+        info!("✓ Task moved to section successfully");
         Ok(())
     }
 
