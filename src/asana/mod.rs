@@ -613,12 +613,34 @@ impl Asana {
             "data": data
         });
 
-        let model: Wrapper<TaskModel> = self
+        info!("📤 Creating task with body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
+
+        let response = self
             .client
             .call_with_body::<TaskModel>(reqwest::Method::POST, None, None, Some(body))
-            .await?
-            .json()
             .await?;
+
+        info!("📥 Response status: {}", response.status());
+
+        // Check response status before trying to deserialize
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            error!("Failed to create task: {}", error_text);
+            anyhow::bail!("Failed to create task: {}", error_text);
+        }
+
+        // Read response body to see what we got
+        let response_text = response.text().await?;
+        info!("📥 Response body: {}", response_text);
+
+        // Try to deserialize
+        let model: Wrapper<TaskModel> = match serde_json::from_str(&response_text) {
+            Ok(m) => m,
+            Err(e) => {
+                error!("Failed to deserialize create task response: {}. Response: {}", e, response_text);
+                anyhow::bail!("Failed to deserialize create task response: {}. Response: {}", e, response_text);
+            }
+        };
 
         // If section is specified, add task to that section
         if let Some(section_gid) = section {

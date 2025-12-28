@@ -229,14 +229,14 @@ impl Client {
         // Clear relational endpoint state
         self.endpoint.clear();
 
-        // For PUT/DELETE requests, don't add opt_fields as it can cause validation issues
+        // For PUT/DELETE/POST requests, don't add opt_fields as it can cause validation issues
         // opt_fields is primarily for GET requests to specify which fields to return
-        // For PUT requests, we only want to send the data in the body, not validate against opt_fields
-        let mut uri = if matches!(method, Method::PUT | Method::DELETE) {
-            // For PUT/DELETE, don't add opt_fields - just use the base URI
+        // For PUT/POST requests, we only want to send the data in the body, not validate against opt_fields
+        let mut uri = if matches!(method, Method::PUT | Method::DELETE | Method::POST) {
+            // For PUT/DELETE/POST, don't add opt_fields - just use the base URI
             uri
         } else {
-            // For GET/POST, add opt_fields to specify which fields to return
+            // For GET only, add opt_fields to specify which fields to return
             let opts = format!(
                 "this.({}),{}",
                 T::field_names().join("|"),
