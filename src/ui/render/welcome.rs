@@ -4,7 +4,7 @@ use crate::ui::widgets::styling;
 use tui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    text::{Span, Spans, Text},
+    text::Text,
     widgets::{Block, Borders, Paragraph},
 };
 

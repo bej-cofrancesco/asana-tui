@@ -3,9 +3,9 @@ use super::{create_task, edit_task, kanban, task_detail, Frame};
 use crate::state::{Focus, State, View};
 use crate::ui::widgets::styling;
 use tui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    text::{Span, Spans, Text},
-    widgets::{Block, Borders, Paragraph},
+    layout::Rect,
+    text::Span,
+    widgets::{Block, Borders},
 };
 
 /// Render main widget according to state.
@@ -25,17 +25,17 @@ pub fn main(frame: &mut Frame, size: Rect, state: &mut State) {
             recently_completed(frame, size, state);
         }
         View::ProjectTasks => {
-            // Check if we need to show move task section selection modal
+            // Always show kanban view first (so modal appears on top)
+            kanban::kanban(frame, size, state);
+            
+            // Check if we need to show move task section selection modal (render on top)
             if state.has_move_task() {
                 // Get task name for display before borrowing state mutably
                 let task_name = state.get_kanban_selected_task()
                     .map(|t| t.name.clone())
                     .unwrap_or_else(|| "task".to_string());
                 render_move_task_modal(frame, size, &task_name, state);
-                return;
             }
-            // Always show kanban view
-            kanban::kanban(frame, size, state);
         }
         View::TaskDetail => {
             // Check if we need to show delete confirmation dialog
@@ -208,7 +208,9 @@ fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
         Spans::from(""),
         Spans::from(Span::styled(
             "This action cannot be undone.",
-            Style::default().fg(Color::Red),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )),
         Spans::from(""),
     ];
@@ -217,8 +219,17 @@ fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Confirm Delete")
-                .border_style(styling::active_block_border_style()),
+                .title(Span::styled(
+                    "⚠️  Confirm Delete",
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::BOLD),
+                ))
+                .border_style(
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::BOLD),
+                ),
         )
         .alignment(Alignment::Center)
         .wrap(Wrap { trim: true });

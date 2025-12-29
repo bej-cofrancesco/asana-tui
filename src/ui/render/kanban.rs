@@ -24,42 +24,37 @@ pub fn kanban(frame: &mut Frame, size: Rect, state: &State) {
         return;
     }
 
-    // Split into columns area and details area (70/30 split)
+    // Always show exactly 3 section columns + 1 detail column
+    // Calculate widths: 3 columns get 75% total, detail gets 25%
+    // Each column gets 25% of total width
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .constraints([
+            Constraint::Percentage(25), // Column 1
+            Constraint::Percentage(25), // Column 2
+            Constraint::Percentage(25), // Column 3
+            Constraint::Percentage(25), // Details
+        ])
         .split(size);
 
-    // Render kanban columns on the left
-    render_kanban_columns(frame, chunks[0], state);
+    // Render kanban columns (first 3 chunks)
+    render_kanban_columns(frame, &chunks[0..3], state);
     
-    // Render task details on the right
-    render_kanban_details(frame, chunks[1], state);
+    // Render task details on the right (last chunk)
+    render_kanban_details(frame, chunks[3], state);
 }
 
-fn render_kanban_columns(frame: &mut Frame, size: Rect, state: &State) {
+fn render_kanban_columns(frame: &mut Frame, column_chunks: &[Rect], state: &State) {
     let sections = state.get_sections();
     let tasks = state.get_filtered_tasks(); // Use filtered tasks
     let current_column = state.get_kanban_column_index();
     let current_task_index = state.get_kanban_task_index();
-    let horizontal_scroll = state.get_kanban_horizontal_scroll();
-
-    // Fixed column width (minimum 30 characters)
-    const COLUMN_WIDTH: u16 = 35;
-    let visible_width = size.width;
     
-    // Calculate which columns to show based on scroll offset
-    let start_col = horizontal_scroll;
-    let max_visible_cols = (visible_width / COLUMN_WIDTH).max(1) as usize;
-    let end_col = (start_col + max_visible_cols).min(sections.len());
+    // Get visible section indices (sections with tasks after filtering)
+    let visible_indices = state.get_visible_section_indices();
     
-    // Only render visible columns
-    let visible_sections: Vec<_> = sections.iter().enumerate()
-        .skip(start_col)
-        .take(end_col - start_col)
-        .collect();
-
-    if visible_sections.is_empty() {
+    if visible_indices.is_empty() {
+        // Show empty message in first column
         let block = Block::default()
             .borders(Borders::ALL)
             .title("Kanban Board");
@@ -67,22 +62,43 @@ fn render_kanban_columns(frame: &mut Frame, size: Rect, state: &State) {
             .block(block)
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(text, size);
+        frame.render_widget(text, column_chunks[0]);
         return;
     }
-
-    // Create horizontal layout for visible columns with fixed width
-    let constraints: Vec<Constraint> = visible_sections.iter()
-        .map(|_| Constraint::Length(COLUMN_WIDTH))
+    
+    // Find current position in visible indices to determine which columns to show
+    let current_pos = visible_indices.iter()
+        .position(|&idx| idx == current_column)
+        .unwrap_or(0);
+    
+    // Always show 3 columns, centered around current selection
+    // Calculate which 3 sections to show
+    let num_visible = visible_indices.len();
+    let num_to_show = column_chunks.len().min(num_visible);
+    
+    // Determine start position: try to center current column, but adjust if near edges
+    let start_pos = if num_visible <= num_to_show {
+        0
+    } else if current_pos < num_to_show / 2 {
+        0
+    } else if current_pos >= num_visible - num_to_show / 2 {
+        num_visible - num_to_show
+    } else {
+        current_pos - num_to_show / 2
+    };
+    
+    // Get the sections to display
+    let sections_to_display: Vec<_> = visible_indices.iter()
+        .skip(start_pos)
+        .take(num_to_show)
+        .enumerate()
+        .filter_map(|(display_idx, &section_idx)| {
+            sections.get(section_idx).map(|s| (display_idx, section_idx, s))
+        })
         .collect();
-
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(constraints.as_slice())
-        .split(size);
-
-    // Render each visible section as a column
-    for ((idx, section), chunk) in visible_sections.iter().zip(chunks.iter()) {
+    
+    // Render each section column
+    for ((_display_idx, section_idx, section), chunk) in sections_to_display.iter().zip(column_chunks.iter()) {
         let section_tasks: Vec<&crate::asana::Task> = tasks
             .iter()
             .filter(|t| {
@@ -93,14 +109,29 @@ fn render_kanban_columns(frame: &mut Frame, size: Rect, state: &State) {
             })
             .collect();
 
+        // Check if this is the currently selected column (using original section index)
+        let is_selected = *section_idx == current_column;
+
         render_kanban_column(
             frame,
             *chunk,
             section,
             &section_tasks,
-            *idx == current_column,
-            if *idx == current_column { Some(current_task_index) } else { None },
+            is_selected,
+            if is_selected { Some(current_task_index) } else { None },
         );
+    }
+    
+    // If we have fewer sections than columns, render empty columns
+    for chunk in column_chunks.iter().skip(sections_to_display.len()) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title("")
+            .border_style(Style::default().fg(Color::DarkGray));
+        let text = Paragraph::new("")
+            .block(block)
+            .alignment(Alignment::Center);
+        frame.render_widget(text, *chunk);
     }
 }
 
@@ -131,45 +162,78 @@ fn render_kanban_column(
         return;
     }
 
+    // Calculate available width for task names (accounting for borders and padding)
+    // Column width is 35, minus 2 for borders, minus some padding = ~30 characters
+    let available_width = size.width.saturating_sub(4) as usize; // Account for borders and padding
+    
     let items: Vec<ListItem> = tasks
         .iter()
         .enumerate()
         .map(|(idx, task)| {
-            let mut spans = vec![];
-            
             // Task name (bold if selected)
             let name_style = if is_selected && selected_task_index == Some(idx) {
                 styling::active_list_item_style()
             } else {
                 styling::normal_text_style()
             };
-            spans.push(Span::styled(&task.name, name_style));
-
+            
+            // Build the full text with all indicators
+            let mut full_text = task.name.clone();
+            
             // Add assignee indicator
             if let Some(ref assignee) = task.assignee {
-                spans.push(Span::styled(
-                    format!(" (@{})", assignee.name),
-                    Style::default().fg(Color::Cyan),
-                ));
+                full_text.push_str(&format!(" (@{})", assignee.name));
             }
 
             // Add due date if present
             if let Some(ref due_on) = task.due_on {
-                spans.push(Span::styled(
-                    format!(" [{}]", due_on),
-                    Style::default().fg(Color::Yellow),
-                ));
+                full_text.push_str(&format!(" [{}]", due_on));
             }
 
             // Add completion indicator
             if task.completed {
-                spans.push(Span::styled(
-                    " ✓",
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-                ));
+                full_text.push_str(" ✓");
             }
-
-            ListItem::new(Spans::from(spans))
+            
+            // Split text into multiple lines that fit within available width
+            let mut lines: Vec<Spans> = vec![];
+            let words: Vec<String> = full_text.split_whitespace().map(|s| s.to_string()).collect();
+            let mut current_line = vec![];
+            let mut current_line_len = 0;
+            
+            for word in words {
+                let word_len = word.chars().count();
+                // Add 1 for space (except first word on line)
+                let space_len = if current_line.is_empty() { 0 } else { 1 };
+                
+                if current_line_len + space_len + word_len <= available_width {
+                    // Word fits on current line
+                    if !current_line.is_empty() {
+                        current_line.push(Span::raw(" "));
+                    }
+                    current_line.push(Span::styled(word.clone(), name_style));
+                    current_line_len += space_len + word_len;
+                } else {
+                    // Word doesn't fit, start new line
+                    if !current_line.is_empty() {
+                        lines.push(Spans::from(current_line));
+                    }
+                    current_line = vec![Span::styled(word.clone(), name_style)];
+                    current_line_len = word_len;
+                }
+            }
+            
+            // Add the last line if it's not empty
+            if !current_line.is_empty() {
+                lines.push(Spans::from(current_line));
+            }
+            
+            // If no lines were created (empty task name), create at least one line
+            if lines.is_empty() {
+                lines.push(Spans::from(vec![Span::styled("", name_style)]));
+            }
+            
+            ListItem::new(lines)
         })
         .collect();
 
@@ -197,9 +261,23 @@ fn render_kanban_column(
 
 fn render_kanban_details(frame: &mut Frame, size: Rect, state: &State) {
     let sections = state.get_sections();
-    let tasks = state.get_tasks();
+    let tasks = state.get_filtered_tasks(); // Use filtered tasks to respect search/filter
     let current_column = state.get_kanban_column_index();
     let current_task_index = state.get_kanban_task_index();
+
+    // Validate current column index against visible sections to prevent crashes
+    let visible_indices = state.get_visible_section_indices();
+    if visible_indices.is_empty() || !visible_indices.contains(&current_column) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title("Details");
+        let text = Paragraph::new("Select a task to view details")
+            .block(block)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(text, size);
+        return;
+    }
 
     if current_column >= sections.len() {
         let block = Block::default()

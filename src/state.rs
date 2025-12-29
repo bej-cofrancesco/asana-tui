@@ -844,6 +844,19 @@ impl State {
     ///
     pub fn set_sections(&mut self, sections: Vec<Section>) -> &mut Self {
         self.sections = sections;
+        // Validate and adjust column index if needed
+        let visible_indices = self.get_visible_section_indices();
+        if !visible_indices.is_empty() {
+            // If current column index is not in visible indices, reset to first visible
+            if !visible_indices.contains(&self.kanban_column_index) {
+                self.kanban_column_index = visible_indices[0];
+                self.kanban_task_index = 0;
+            }
+        } else if !self.sections.is_empty() {
+            // If no visible sections but we have sections, reset to first section
+            self.kanban_column_index = 0;
+            self.kanban_task_index = 0;
+        }
         self
     }
 
@@ -1063,7 +1076,19 @@ impl State {
     ///
     #[allow(dead_code)]
     pub fn set_kanban_column_index(&mut self, index: usize) -> &mut Self {
-        self.kanban_column_index = index.min(self.sections.len().saturating_sub(1));
+        // Validate against visible sections to prevent crashes when filtering
+        let visible_indices = self.get_visible_section_indices();
+        if !visible_indices.is_empty() {
+            // If index is in visible sections, use it; otherwise use first visible
+            if visible_indices.contains(&index) {
+                self.kanban_column_index = index;
+            } else {
+                self.kanban_column_index = visible_indices[0];
+            }
+        } else {
+            // No visible sections, clamp to sections length
+            self.kanban_column_index = index.min(self.sections.len().saturating_sub(1));
+        }
         self
     }
 
@@ -1102,57 +1127,107 @@ impl State {
         self
     }
 
+    /// Get visible sections (sections that have tasks after filtering).
+    /// Returns a vector of section indices that should be shown.
+    ///
+    pub fn get_visible_section_indices(&self) -> Vec<usize> {
+        let sections = &self.sections;
+        let tasks = self.get_filtered_tasks();
+
+        // Get all sections that have tasks after filtering
+        let sections_with_tasks: Vec<usize> = sections
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, section)| {
+                // Check if this section has any filtered tasks
+                if tasks.iter().any(|t| {
+                    t.section
+                        .as_ref()
+                        .map(|s| s.gid == section.gid)
+                        .unwrap_or(false)
+                }) {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // If we have a search/filter active and some sections have no tasks, only show sections with tasks
+        if !self.search_query.is_empty() && sections_with_tasks.len() < sections.len() {
+            // Filtering is active - only show sections with tasks
+            sections_with_tasks
+        } else {
+            // No filtering or all sections have tasks - show all sections
+            (0..sections.len()).collect::<Vec<_>>()
+        }
+    }
+
     /// Navigate to next kanban column.
     ///
     pub fn next_kanban_column(&mut self) -> &mut Self {
-        if !self.sections.is_empty() {
-            self.kanban_column_index = (self.kanban_column_index + 1) % self.sections.len();
-            // Auto-scroll to keep selected column visible
-            self.auto_scroll_to_column();
+        let visible_indices = self.get_visible_section_indices();
+
+        if visible_indices.is_empty() {
+            return self;
         }
+
+        // Find current position in visible indices
+        let current_pos = visible_indices
+            .iter()
+            .position(|&idx| idx == self.kanban_column_index)
+            .unwrap_or(0);
+
+        // Move to next position, wrapping around
+        let next_pos = (current_pos + 1) % visible_indices.len();
+        self.kanban_column_index = visible_indices[next_pos];
+
+        // Reset task index when changing columns
+        self.kanban_task_index = 0;
+        // Auto-scroll to keep selected column visible
+        self.auto_scroll_to_column();
+
         self
     }
 
     /// Navigate to previous kanban column.
     ///
     pub fn previous_kanban_column(&mut self) -> &mut Self {
-        if !self.sections.is_empty() {
-            if self.kanban_column_index > 0 {
-                self.kanban_column_index -= 1;
-            } else {
-                self.kanban_column_index = self.sections.len() - 1;
-            }
-            // Reset task index when changing columns
-            self.kanban_task_index = 0;
-            // Auto-scroll to keep selected column visible
-            self.auto_scroll_to_column();
+        let visible_indices = self.get_visible_section_indices();
+
+        if visible_indices.is_empty() {
+            return self;
         }
+
+        // Find current position in visible indices
+        let current_pos = visible_indices
+            .iter()
+            .position(|&idx| idx == self.kanban_column_index)
+            .unwrap_or(0);
+
+        // Move to previous position, wrapping around
+        let prev_pos = if current_pos > 0 {
+            current_pos - 1
+        } else {
+            visible_indices.len() - 1
+        };
+        self.kanban_column_index = visible_indices[prev_pos];
+
+        // Reset task index when changing columns
+        self.kanban_task_index = 0;
+        // Auto-scroll to keep selected column visible
+        self.auto_scroll_to_column();
+
         self
     }
 
     /// Auto-scroll to keep the selected column visible.
-    /// Uses terminal size to calculate visible columns.
+    /// With fixed 3-column layout, this is now a no-op but kept for compatibility.
     ///
     fn auto_scroll_to_column(&mut self) {
-        const COLUMN_WIDTH: usize = 35;
-
-        // Get the available width for kanban columns (70% of terminal width, as per layout)
-        let available_width = (self.terminal_size.width as f32 * 0.7) as usize;
-        let max_visible_cols = (available_width / COLUMN_WIDTH).max(1);
-
-        let current_col = self.kanban_column_index;
-        let scroll_start = self.kanban_horizontal_scroll;
-        let scroll_end = scroll_start + max_visible_cols;
-
-        // If current column is before visible area, scroll to show it at the start
-        if current_col < scroll_start {
-            self.kanban_horizontal_scroll = current_col;
-        }
-        // If current column is at or after visible area end, scroll to show it
-        else if current_col >= scroll_end {
-            // Position so the selected column is visible (preferably near the end of visible area)
-            self.kanban_horizontal_scroll = current_col.saturating_sub(max_visible_cols - 1);
-        }
+        // With fixed 3-column layout, we always show 3 columns centered around selection
+        // No horizontal scrolling needed, but we keep this function for compatibility
+        // The rendering code handles centering the current column in the 3 visible columns
     }
 
     /// Set task GID for moving (opens section selection modal).
@@ -1206,8 +1281,9 @@ impl State {
     pub fn next_kanban_task(&mut self) -> &mut Self {
         if !self.sections.is_empty() && self.kanban_column_index < self.sections.len() {
             let section = &self.sections[self.kanban_column_index];
-            let section_tasks: Vec<&Task> = self
-                .tasks
+            // Use filtered tasks to respect search/filter
+            let filtered_tasks = self.get_filtered_tasks();
+            let section_tasks: Vec<&Task> = filtered_tasks
                 .iter()
                 .filter(|t| {
                     t.section
@@ -1219,6 +1295,9 @@ impl State {
 
             if !section_tasks.is_empty() {
                 self.kanban_task_index = (self.kanban_task_index + 1) % section_tasks.len();
+            } else {
+                // No tasks in this section after filtering, reset index
+                self.kanban_task_index = 0;
             }
         }
         self
@@ -1230,8 +1309,9 @@ impl State {
     pub fn previous_kanban_task(&mut self) -> &mut Self {
         if !self.sections.is_empty() && self.kanban_column_index < self.sections.len() {
             let section = &self.sections[self.kanban_column_index];
-            let section_tasks: Vec<&Task> = self
-                .tasks
+            // Use filtered tasks to respect search/filter
+            let filtered_tasks = self.get_filtered_tasks();
+            let section_tasks: Vec<&Task> = filtered_tasks
                 .iter()
                 .filter(|t| {
                     t.section
@@ -1247,6 +1327,9 @@ impl State {
                 } else {
                     self.kanban_task_index = section_tasks.len() - 1;
                 }
+            } else {
+                // No tasks in this section after filtering, reset index
+                self.kanban_task_index = 0;
             }
         }
         self
@@ -1254,14 +1337,15 @@ impl State {
 
     /// Get current selected task in kanban view.
     ///
-    pub fn get_kanban_selected_task(&self) -> Option<&Task> {
+    pub fn get_kanban_selected_task(&self) -> Option<Task> {
         if self.sections.is_empty() || self.kanban_column_index >= self.sections.len() {
             return None;
         }
 
         let section = &self.sections[self.kanban_column_index];
-        let section_tasks: Vec<&Task> = self
-            .tasks
+        // Use filtered tasks to respect search/filter
+        let filtered_tasks = self.get_filtered_tasks();
+        let section_tasks: Vec<&Task> = filtered_tasks
             .iter()
             .filter(|t| {
                 t.section
@@ -1272,7 +1356,7 @@ impl State {
             .collect();
 
         if self.kanban_task_index < section_tasks.len() {
-            Some(section_tasks[self.kanban_task_index])
+            Some(section_tasks[self.kanban_task_index].clone())
         } else {
             None
         }
@@ -2048,6 +2132,16 @@ impl State {
                         }
                     } else {
                         self.tasks_list_state.select(None);
+                    }
+                    // Also validate kanban column index when filtering tasks
+                    // This prevents crashes when sections become hidden due to filtering
+                    let visible_indices = self.get_visible_section_indices();
+                    if !visible_indices.is_empty() {
+                        if !visible_indices.contains(&self.kanban_column_index) {
+                            // Current column is not visible, move to first visible
+                            self.kanban_column_index = visible_indices[0];
+                            self.kanban_task_index = 0;
+                        }
                     }
                 }
             }

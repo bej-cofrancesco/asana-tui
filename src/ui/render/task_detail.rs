@@ -2,12 +2,110 @@ use super::Frame;
 use crate::state::{State, TaskDetailPanel};
 use crate::ui::widgets::styling;
 use chrono::DateTime;
+use regex::Regex;
 use tui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Span, Spans, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Wrap},
 };
+
+/// Parse mentions in text - convert profile URLs to @mentions
+fn parse_mentions(text: &str, users: &[crate::asana::User]) -> String {
+    // Pattern: https://app.asana.com/0/profile/{gid}
+    let profile_re = Regex::new(r"https://app\.asana\.com/0/profile/(\d+)").unwrap();
+    
+    profile_re.replace_all(text, |caps: &regex::Captures| {
+        if let Some(gid) = caps.get(1) {
+            // Find user by GID
+            if let Some(user) = users.iter().find(|u| u.gid == gid.as_str()) {
+                format!("@{}", user.name)
+            } else {
+                // Keep original URL if user not found
+                caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string()
+            }
+        } else {
+            caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string()
+        }
+    }).to_string()
+}
+
+/// Parse line text and highlight @mentions
+fn parse_line_with_mentions(line: &str, users: &[crate::asana::User]) -> Spans<'static> {
+    let mut spans = Vec::new();
+    
+    // Pattern to match @mentions - match @ followed by word characters and spaces
+    // We'll manually check for delimiters after matching to avoid look-ahead
+    let mention_re = Regex::new(r"@([\w\s]+)").unwrap();
+    let mut last_end = 0;
+    
+    for cap in mention_re.captures_iter(line) {
+        let full_match = cap.get(0).unwrap();
+        let mention_name = cap.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+        
+        // Check if the mention is followed by a valid delimiter or end of string
+        // Valid delimiters: whitespace, punctuation, or end of line
+        let match_end = full_match.end();
+        let is_valid_mention_end = if match_end >= line.len() {
+            true // End of string is always valid
+        } else {
+            let next_char = line[match_end..].chars().next();
+            // Valid if followed by whitespace, punctuation, or nothing
+            next_char.map(|c| {
+                c.is_whitespace() || matches!(c, '.' | ',' | '!' | '?' | ';' | ':')
+            }).unwrap_or(true)
+        };
+        
+        // Only process if it's a valid mention boundary
+        if is_valid_mention_end {
+            // Add text before mention (clone to own the data)
+            if full_match.start() > last_end {
+                spans.push(Span::styled(
+                    line[last_end..full_match.start()].to_string(),
+                    styling::normal_text_style(),
+                ));
+            }
+            
+            // Check if this mention matches a known user
+            let is_valid_mention = users.iter().any(|u| {
+                u.name.eq_ignore_ascii_case(mention_name)
+            });
+            
+            // Add highlighted mention (clone to own the data)
+            let mention_text = full_match.as_str().to_string();
+            if is_valid_mention {
+                spans.push(Span::styled(
+                    mention_text,
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                // Not a valid mention, render as normal text
+                spans.push(Span::styled(
+                    mention_text,
+                    styling::normal_text_style(),
+                ));
+            }
+            
+            last_end = full_match.end();
+        }
+    }
+    
+    // Add remaining text (clone to own the data)
+    if last_end < line.len() {
+        spans.push(Span::styled(
+            line[last_end..].to_string(),
+            styling::normal_text_style(),
+        ));
+    }
+    
+    if spans.is_empty() {
+        Spans::from(Span::styled(line.to_string(), styling::normal_text_style()))
+    } else {
+        Spans::from(spans)
+    }
+}
 
 /// Render task detail view (full screen).
 ///
@@ -254,77 +352,65 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
             wrapped
         };
 
-        // Create nice multi-line comment items with proper formatting
-        let items: Vec<ListItem> = comments
-            .iter()
-            .map(|story| {
-                let author = story
-                    .created_by
-                    .as_ref()
-                    .map(|u| u.name.clone())
-                    .unwrap_or_else(|| "Unknown".to_string());
-                let timestamp_str = story
-                    .created_at
-                    .as_ref()
-                    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                    .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                    .unwrap_or_else(|| "Unknown time".to_string());
-
-                let header = Spans::from(vec![
-                    Span::styled(author, Style::default().fg(Color::Cyan)),
-                    Span::styled(" • ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(timestamp_str, Style::default().fg(Color::DarkGray)),
-                ]);
-
-                // Wrap comment text to fit available width
-                let wrapped_lines = wrap_text(&story.text, available_width);
-                
-                // Create Spans for each wrapped line
-                let text_lines: Vec<Spans> = wrapped_lines
-                    .iter()
-                    .map(|line| {
-                        Spans::from(Span::styled(
-                            line.clone(),
-                            styling::normal_text_style(),
-                        ))
-                    })
-                    .collect();
-
-                let mut all_lines = vec![header, Spans::from("")]; // Add blank line after header
-                all_lines.extend(text_lines);
-                all_lines.push(Spans::from("")); // Add blank line after comment
-
-                ListItem::new(all_lines)
-            })
-            .collect();
-
-        // Use ListState for proper item-by-item navigation
-        // For bottom-aligned list: index 0 = newest (last item), higher = older
-        let mut selected_index = state.get_comments_scroll_offset();
-        let total_items = items.len();
+        // Create all comment lines as Spans (simpler, better performance)
+        // Comments are already in chronological order (oldest first), so newest is at the end
+        let mut all_lines: Vec<Spans> = Vec::new();
         
-        // Ensure selected_index is within bounds (wrap around if needed)
-        if total_items > 0 {
-            selected_index = selected_index % total_items;
+        for story in comments.iter() {
+            let author = story
+                .created_by
+                .as_ref()
+                .map(|u| u.name.clone())
+                .unwrap_or_else(|| "Unknown".to_string());
+            let timestamp_str = story
+                .created_at
+                .as_ref()
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| "Unknown time".to_string());
+
+            let header = Spans::from(vec![
+                Span::styled(author, Style::default().fg(Color::Cyan)),
+                Span::styled(" • ", Style::default().fg(Color::DarkGray)),
+                Span::styled(timestamp_str, Style::default().fg(Color::DarkGray)),
+            ]);
+
+            // Parse mentions in comment text (profile URLs like https://app.asana.com/0/profile/...)
+            let parsed_text = parse_mentions(&story.text, &state.get_workspace_users());
+            
+            // Wrap comment text to fit available width
+            let wrapped_lines = wrap_text(&parsed_text, available_width);
+            
+            // Create Spans for each wrapped line (with mention highlighting)
+            let text_lines: Vec<Spans> = wrapped_lines
+                .iter()
+                .map(|line| {
+                    parse_line_with_mentions(line, &state.get_workspace_users())
+                })
+                .collect();
+
+            all_lines.push(header);
+            all_lines.push(Spans::from("")); // Add blank line after header
+            all_lines.extend(text_lines);
+            all_lines.push(Spans::from("")); // Add blank line after comment
+        }
+
+        // Use Paragraph instead of List for better performance - show all comments
+        // Scroll to bottom to show newest comments (which are at the end)
+        let total_lines = all_lines.len();
+        let visible_height = chunks[0].height.saturating_sub(2) as usize; // Account for borders
+        let scroll_offset = if total_lines > visible_height {
+            (total_lines - visible_height) as u16
         } else {
-            selected_index = 0;
-        }
-        
-        // Create list with all items - tui-rs List widget handles scrolling automatically
-        let list = List::new(items.clone())
+            0
+        };
+
+        let paragraph = Paragraph::new(Text::from(all_lines))
             .block(block)
-            .style(styling::normal_text_style());
-            // No highlight_style - make selection subtle (just cursor, no color)
+            .wrap(Wrap { trim: true })
+            .scroll((scroll_offset, 0)); // Scroll to bottom (newest)
         
-        // Create a list state with selected item (from bottom: 0 = last item)
-        let mut list_state = tui::widgets::ListState::default();
-        if !items.is_empty() {
-            // Convert from bottom index to top index: last item = index 0, second last = index 1, etc.
-            let top_index = total_items.saturating_sub(1).saturating_sub(selected_index);
-            list_state.select(Some(top_index.min(total_items.saturating_sub(1))));
-        }
-        
-        frame.render_stateful_widget(list, chunks[0], &mut list_state);
+        frame.render_widget(paragraph, chunks[0]);
     }
 
     // Show comment input if in comment input mode

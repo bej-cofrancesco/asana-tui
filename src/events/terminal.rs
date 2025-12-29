@@ -206,6 +206,10 @@ impl Handler {
                                         state.dispatch(crate::events::network::Event::ProjectTasks);
                                     }
                                 }
+                                crate::state::View::ProjectTasks => {
+                                    // When escaping from ProjectTasks, always focus menu
+                                    state.focus_menu();
+                                }
                                 _ => {}
                             }
                             
@@ -242,22 +246,28 @@ impl Handler {
                             _ => {}
                         }
                     } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
-                        // Navigate to previous panel in task detail view
+                        // In task detail view, navigate to previous panel
                         debug!("Processing previous task panel event '{:?}'...", event);
                         state.previous_task_panel();
-                    } else if matches!(state.current_view(), crate::state::View::KanbanBoard) 
-                        || (matches!(state.current_view(), crate::state::View::ProjectTasks) 
-                            && state.get_view_mode() == crate::state::ViewMode::Kanban) {
-                        // Navigate to previous kanban column
+                    } else if matches!(state.current_view(), crate::state::View::ProjectTasks)
+                        && *state.current_focus() == Focus::View {
+                        // In kanban view with View focus, navigate to previous column
                         debug!("Processing previous kanban column event '{:?}'...", event);
                         state.previous_kanban_column();
                     } else {
+                        // In normal mode (Welcome view) or Menu focus, navigate menu
                         match state.current_focus() {
                     Focus::Menu => {
                         debug!("Processing previous menu event '{:?}'...", event);
                         state.previous_menu();
                     }
-                    Focus::View => {}
+                    Focus::View => {
+                        // If we're in Welcome view but focus is View, switch to Menu focus
+                        if matches!(state.current_view(), crate::state::View::Welcome) {
+                            state.focus_menu();
+                            state.previous_menu();
+                        }
+                    }
                         }
                     }
                 }
@@ -283,22 +293,28 @@ impl Handler {
                             _ => {}
                         }
                     } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
-                        // Navigate to next panel in task detail view
+                        // In task detail view, navigate to next panel
                         debug!("Processing next task panel event '{:?}'...", event);
                         state.next_task_panel();
-                    } else if matches!(state.current_view(), crate::state::View::KanbanBoard) 
-                        || (matches!(state.current_view(), crate::state::View::ProjectTasks) 
-                            && state.get_view_mode() == crate::state::ViewMode::Kanban) {
-                        // Navigate to next kanban column
+                    } else if matches!(state.current_view(), crate::state::View::ProjectTasks)
+                        && *state.current_focus() == Focus::View {
+                        // In kanban view with View focus, navigate to next column
                         debug!("Processing next kanban column event '{:?}'...", event);
                         state.next_kanban_column();
                     } else {
+                        // In normal mode (Welcome view) or Menu focus, navigate menu
                         match state.current_focus() {
                     Focus::Menu => {
                         debug!("Processing next menu event '{:?}'...", event);
                         state.next_menu();
                     }
-                    Focus::View => {}
+                    Focus::View => {
+                        // If we're in Welcome view but focus is View, switch to Menu focus
+                        if matches!(state.current_view(), crate::state::View::Welcome) {
+                            state.focus_menu();
+                            state.next_menu();
+                        }
+                    }
                         }
                     }
                 }
@@ -330,22 +346,35 @@ impl Handler {
                         // In comment input mode, 'k' should be typed, not scroll
                         state.add_comment_char('k');
                     } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
-                        // Scroll based on active panel
-                        let panel = state.get_current_task_panel();
-                        match panel {
-                            crate::state::TaskDetailPanel::Details => {
-                                debug!("Processing scroll details up event '{:?}'...", event);
-                                state.scroll_details_up();
-                            }
-                            crate::state::TaskDetailPanel::Comments => {
-                                debug!("Processing scroll comments up event '{:?}'...", event);
-                                state.scroll_comments_up();
-                            }
-                            crate::state::TaskDetailPanel::Notes => {
-                                debug!("Processing scroll notes up event '{:?}'...", event);
-                                state.scroll_notes_up();
+                        // In task detail view, handle based on active panel
+                        if state.get_current_task_panel() == crate::state::TaskDetailPanel::Comments {
+                            // Scroll comments up
+                            debug!("Processing scroll comments up event '{:?}'...", event);
+                            state.scroll_comments_up();
+                        } else {
+                            // Navigate to previous task in filtered list
+                            let filtered = state.get_filtered_tasks();
+                            if let Some(current_task) = state.get_task_detail() {
+                                // Find current task index in filtered list
+                                if let Some(current_idx) = filtered.iter().position(|t| t.gid == current_task.gid) {
+                                    let prev_idx = if current_idx > 0 {
+                                        current_idx - 1
+                                    } else {
+                                        filtered.len().saturating_sub(1)
+                                    };
+                                    if prev_idx < filtered.len() && !filtered.is_empty() {
+                                        let task = &filtered[prev_idx];
+                                        state.dispatch(crate::events::network::Event::GetTaskDetail {
+                                            gid: task.gid.clone(),
+                                        });
+                                    }
+                                }
                             }
                         }
+                    } else if matches!(state.current_view(), crate::state::View::ProjectTasks) {
+                        // In kanban view, navigate to previous task
+                        debug!("Processing previous kanban task event '{:?}'...", event);
+                        state.previous_kanban_task();
                     } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
                         // Handle dropdown navigation in forms
                         match state.get_edit_form_state() {
@@ -363,12 +392,6 @@ impl Handler {
                         // In move task modal, navigate sections
                         debug!("Processing previous section in move modal event '{:?}'...", event);
                         state.previous_section();
-                    } else if matches!(state.current_view(), crate::state::View::KanbanBoard) 
-                        || (matches!(state.current_view(), crate::state::View::ProjectTasks) 
-                            && state.get_view_mode() == crate::state::ViewMode::Kanban) {
-                        // Navigate to previous kanban task
-                        debug!("Processing previous kanban task event '{:?}'...", event);
-                        state.previous_kanban_task();
                     } else {
                         match state.current_focus() {
                     Focus::Menu => {
@@ -418,22 +441,35 @@ impl Handler {
                         // In comment input mode, 'j' should be typed, not scroll
                         state.add_comment_char('j');
                     } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
-                        // Scroll based on active panel
-                        let panel = state.get_current_task_panel();
-                        match panel {
-                            crate::state::TaskDetailPanel::Details => {
-                                debug!("Processing scroll details down event '{:?}'...", event);
-                                state.scroll_details_down();
-                            }
-                            crate::state::TaskDetailPanel::Comments => {
-                                debug!("Processing scroll comments down event '{:?}'...", event);
-                                state.scroll_comments_down();
-                            }
-                            crate::state::TaskDetailPanel::Notes => {
-                                debug!("Processing scroll notes down event '{:?}'...", event);
-                                state.scroll_notes_down();
+                        // In task detail view, handle based on active panel
+                        if state.get_current_task_panel() == crate::state::TaskDetailPanel::Comments {
+                            // Scroll comments down
+                            debug!("Processing scroll comments down event '{:?}'...", event);
+                            state.scroll_comments_down();
+                        } else {
+                            // Navigate to next task in filtered list
+                            let filtered = state.get_filtered_tasks();
+                            if let Some(current_task) = state.get_task_detail() {
+                                // Find current task index in filtered list
+                                if let Some(current_idx) = filtered.iter().position(|t| t.gid == current_task.gid) {
+                                    let next_idx = if filtered.is_empty() {
+                                        0
+                                    } else {
+                                        (current_idx + 1) % filtered.len()
+                                    };
+                                    if next_idx < filtered.len() && !filtered.is_empty() {
+                                        let task = &filtered[next_idx];
+                                        state.dispatch(crate::events::network::Event::GetTaskDetail {
+                                            gid: task.gid.clone(),
+                                        });
+                                    }
+                                }
                             }
                         }
+                    } else if matches!(state.current_view(), crate::state::View::ProjectTasks) {
+                        // In kanban view, navigate to next task
+                        debug!("Processing next kanban task event '{:?}'...", event);
+                        state.next_kanban_task();
                     } else if matches!(state.current_view(), crate::state::View::CreateTask | crate::state::View::EditTask) {
                         // Handle dropdown navigation in forms
                         match state.get_edit_form_state() {
@@ -451,12 +487,6 @@ impl Handler {
                         // In move task modal, navigate sections
                         debug!("Processing next section in move modal event '{:?}'...", event);
                         state.next_section();
-                    } else if matches!(state.current_view(), crate::state::View::KanbanBoard) 
-                        || (matches!(state.current_view(), crate::state::View::ProjectTasks) 
-                            && state.get_view_mode() == crate::state::ViewMode::Kanban) {
-                        // Navigate to next kanban task
-                        debug!("Processing next kanban task event '{:?}'...", event);
-                        state.next_kanban_task();
                     } else {
                         match state.current_focus() {
                     Focus::Menu => {

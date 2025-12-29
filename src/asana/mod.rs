@@ -118,10 +118,10 @@ impl Asana {
         // The workspace_gid parameter is kept for API compatibility but not used
         let mut params: Vec<(&str, &str)> = vec![("project", project_gid)];
 
-        // Add opt_fields to request section information via memberships
-        // This is needed for kanban board to group tasks by section
+        // Add opt_fields to request section and assignee information via memberships
+        // This is needed for kanban board to group tasks by section and show assignees
         // Note: This will override the model's opt_fields, so we need to include all fields we want
-        let opt_fields = "resource_type,name,completed,memberships.section.gid,memberships.section.name";
+        let opt_fields = "resource_type,name,completed,memberships.section.gid,memberships.section.name,assignee.name,assignee.email";
         params.push(("opt_fields", opt_fields));
 
         // Only filter to incomplete tasks if we don't want completed tasks
@@ -170,12 +170,34 @@ impl Asana {
                     None
                 };
 
+                // Extract assignee from extra fields
+                let assignee = if let Some(assignee_val) = t.extra.get("assignee") {
+                    if let Some(assignee_obj) = assignee_val.as_object() {
+                        if let (Some(gid_val), Some(name_val)) = (
+                            assignee_obj.get("gid").and_then(|v| v.as_str()),
+                            assignee_obj.get("name").and_then(|v| v.as_str()),
+                        ) {
+                            Some(User {
+                                gid: gid_val.to_string(),
+                                name: name_val.to_string(),
+                                email: assignee_obj.get("email").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
                 Task {
                     gid: t.gid,
                     name: t.name,
                     completed: t.completed,
                     notes: None,
-                    assignee: None,
+                    assignee,
                     due_date: None,
                     due_on: None,
                     start_on: None,
