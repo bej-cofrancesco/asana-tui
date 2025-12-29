@@ -37,6 +37,7 @@ pub enum View {
     KanbanBoard,
     CreateTask,
     EditTask,
+    MoveTaskSection, // Modal for selecting section to move task to
 }
 
 /// Specifying view mode (list or kanban).
@@ -111,6 +112,7 @@ pub struct State {
     debug_entries: Vec<String>, // Store log entries for navigation and copying
     task_filter: TaskFilter,
     delete_confirmation: Option<String>, // GID of task pending deletion confirmation
+    move_task_gid: Option<String>,       // GID of task being moved (for section selection modal)
     current_task_detail: Option<Task>,   // Currently viewed task with full details
     sections: Vec<Section>,              // Project sections for kanban
     workspace_users: Vec<User>,          // Users for assignment dropdowns
@@ -120,6 +122,7 @@ pub struct State {
     edit_form_state: Option<EditFormState>, // Current form field being edited
     kanban_column_index: usize,          // Current column in kanban view
     kanban_task_index: usize,            // Current task index in selected column
+    kanban_horizontal_scroll: usize,     // Horizontal scroll offset for kanban columns
     comment_input_mode: bool,            // Whether in comment input mode
     comment_input_text: String,          // Current comment text being typed
     comments_scroll_offset: usize,       // Scroll offset for comments list
@@ -197,17 +200,19 @@ impl Default for State {
             debug_mode: false,
             debug_index: 0,
             debug_entries: vec![],
-            task_filter: TaskFilter::Incomplete,
+            task_filter: TaskFilter::All,
             delete_confirmation: None,
+            move_task_gid: None,
             current_task_detail: None,
             sections: vec![],
             workspace_users: vec![],
             task_stories: vec![],
-            view_mode: ViewMode::List,
+            view_mode: ViewMode::Kanban,
             edit_mode: false,
             edit_form_state: None,
             kanban_column_index: 0,
             kanban_task_index: 0,
+            kanban_horizontal_scroll: 0,
             comment_input_mode: false,
             comment_input_text: String::new(),
             comments_scroll_offset: 0,
@@ -1068,11 +1073,42 @@ impl State {
         self.kanban_column_index
     }
 
+    /// Get kanban horizontal scroll offset.
+    ///
+    pub fn get_kanban_horizontal_scroll(&self) -> usize {
+        self.kanban_horizontal_scroll
+    }
+
+    /// Set kanban horizontal scroll offset.
+    ///
+    pub fn set_kanban_horizontal_scroll(&mut self, offset: usize) -> &mut Self {
+        self.kanban_horizontal_scroll = offset;
+        self
+    }
+
+    /// Scroll kanban columns left.
+    ///
+    pub fn scroll_kanban_left(&mut self) -> &mut Self {
+        if self.kanban_horizontal_scroll > 0 {
+            self.kanban_horizontal_scroll -= 1;
+        }
+        self
+    }
+
+    /// Scroll kanban columns right.
+    ///
+    pub fn scroll_kanban_right(&mut self) -> &mut Self {
+        self.kanban_horizontal_scroll += 1;
+        self
+    }
+
     /// Navigate to next kanban column.
     ///
     pub fn next_kanban_column(&mut self) -> &mut Self {
         if !self.sections.is_empty() {
             self.kanban_column_index = (self.kanban_column_index + 1) % self.sections.len();
+            // Auto-scroll to keep selected column visible
+            self.auto_scroll_to_column();
         }
         self
     }
@@ -1088,7 +1124,65 @@ impl State {
             }
             // Reset task index when changing columns
             self.kanban_task_index = 0;
+            // Auto-scroll to keep selected column visible
+            self.auto_scroll_to_column();
         }
+        self
+    }
+
+    /// Auto-scroll to keep the selected column visible.
+    /// Uses terminal size to calculate visible columns.
+    ///
+    fn auto_scroll_to_column(&mut self) {
+        const COLUMN_WIDTH: usize = 35;
+
+        // Get the available width for kanban columns (70% of terminal width, as per layout)
+        let available_width = (self.terminal_size.width as f32 * 0.7) as usize;
+        let max_visible_cols = (available_width / COLUMN_WIDTH).max(1);
+
+        let current_col = self.kanban_column_index;
+        let scroll_start = self.kanban_horizontal_scroll;
+        let scroll_end = scroll_start + max_visible_cols;
+
+        // If current column is before visible area, scroll to show it at the start
+        if current_col < scroll_start {
+            self.kanban_horizontal_scroll = current_col;
+        }
+        // If current column is at or after visible area end, scroll to show it
+        else if current_col >= scroll_end {
+            // Position so the selected column is visible (preferably near the end of visible area)
+            self.kanban_horizontal_scroll = current_col.saturating_sub(max_visible_cols - 1);
+        }
+    }
+
+    /// Set task GID for moving (opens section selection modal).
+    ///
+    pub fn set_move_task_gid(&mut self, task_gid: Option<String>) -> &mut Self {
+        let should_init = task_gid.is_some();
+        self.move_task_gid = task_gid;
+        // Initialize section dropdown index when opening modal
+        if should_init {
+            self.init_section_dropdown_index();
+        }
+        self
+    }
+
+    /// Get task GID being moved.
+    ///
+    pub fn get_move_task_gid(&self) -> Option<&String> {
+        self.move_task_gid.as_ref()
+    }
+
+    /// Check if move task modal is open.
+    ///
+    pub fn has_move_task(&self) -> bool {
+        self.move_task_gid.is_some()
+    }
+
+    /// Clear move task state.
+    ///
+    pub fn clear_move_task(&mut self) -> &mut Self {
+        self.move_task_gid = None;
         self
     }
 

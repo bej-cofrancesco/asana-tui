@@ -118,6 +118,12 @@ impl Asana {
         // The workspace_gid parameter is kept for API compatibility but not used
         let mut params: Vec<(&str, &str)> = vec![("project", project_gid)];
 
+        // Add opt_fields to request section information via memberships
+        // This is needed for kanban board to group tasks by section
+        // Note: This will override the model's opt_fields, so we need to include all fields we want
+        let opt_fields = "resource_type,name,completed,memberships.section.gid,memberships.section.name";
+        params.push(("opt_fields", opt_fields));
+
         // Only filter to incomplete tasks if we don't want completed tasks
         // This is more efficient for large projects when we only need incomplete tasks
         // Store the string in a variable that lives long enough
@@ -145,21 +151,41 @@ impl Asana {
 
         Ok(data
             .into_iter()
-            .map(|t| Task {
-                gid: t.gid,
-                name: t.name,
-                completed: t.completed,
-                notes: None,
-                assignee: None,
-                due_date: None,
-                due_on: None,
-                start_on: None,
-                section: None,
-                tags: vec![],
-                created_at: None,
-                modified_at: None,
-                num_subtasks: 0,
-                num_comments: 0,
+            .map(|t| {
+                // Extract section from memberships in extra fields
+                let section = if let Some(memberships) = t.extra.get("memberships").and_then(|m| m.as_array()) {
+                    memberships
+                        .iter()
+                        .find_map(|m| {
+                            m.get("section")
+                                .and_then(|s| s.as_object())
+                                .and_then(|s| {
+                                    Some(Section {
+                                        gid: s.get("gid")?.as_str()?.to_string(),
+                                        name: s.get("name")?.as_str()?.to_string(),
+                                    })
+                                })
+                        })
+                } else {
+                    None
+                };
+
+                Task {
+                    gid: t.gid,
+                    name: t.name,
+                    completed: t.completed,
+                    notes: None,
+                    assignee: None,
+                    due_date: None,
+                    due_on: None,
+                    start_on: None,
+                    section,
+                    tags: vec![],
+                    created_at: None,
+                    modified_at: None,
+                    num_subtasks: 0,
+                    num_comments: 0,
+                }
             })
             .collect())
     }

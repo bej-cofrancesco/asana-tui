@@ -54,6 +54,10 @@ pub enum Event {
         section: Option<String>,
         completed: Option<bool>,
     },
+    MoveTaskToSection {
+        task_gid: String,
+        section_gid: String,
+    },
 }
 
 /// Specify struct for managing state with network events.
@@ -176,6 +180,9 @@ impl<'a> Handler<'a> {
                 self.update_task_fields(gid, name, notes, assignee, due_on, section, completed)
                     .await?
             }
+            Event::MoveTaskToSection { task_gid, section_gid } => {
+                self.move_task_to_section(task_gid, section_gid).await?
+            }
         }
         Ok(())
     }
@@ -222,15 +229,11 @@ impl<'a> Handler<'a> {
             "Fetching tasks for project '{}' (GID: {})...",
             &project.name, &project.gid
         );
-        // Determine if we should include completed tasks based on current filter
-        let include_completed;
+        // Always include completed tasks since we're using kanban view
+        let include_completed = true;
         let view_mode;
         {
             let state = self.state.lock().await;
-            include_completed = matches!(
-                state.get_task_filter(),
-                crate::state::TaskFilter::All | crate::state::TaskFilter::Completed
-            );
             view_mode = state.get_view_mode();
         }
 

@@ -42,10 +42,38 @@ fn render_kanban_columns(frame: &mut Frame, size: Rect, state: &State) {
     let tasks = state.get_filtered_tasks(); // Use filtered tasks
     let current_column = state.get_kanban_column_index();
     let current_task_index = state.get_kanban_task_index();
+    let horizontal_scroll = state.get_kanban_horizontal_scroll();
 
-    // Create horizontal layout for columns
-    let constraints: Vec<Constraint> = (0..sections.len())
-        .map(|_| Constraint::Percentage((100 / sections.len().max(1)) as u16))
+    // Fixed column width (minimum 30 characters)
+    const COLUMN_WIDTH: u16 = 35;
+    let visible_width = size.width;
+    
+    // Calculate which columns to show based on scroll offset
+    let start_col = horizontal_scroll;
+    let max_visible_cols = (visible_width / COLUMN_WIDTH).max(1) as usize;
+    let end_col = (start_col + max_visible_cols).min(sections.len());
+    
+    // Only render visible columns
+    let visible_sections: Vec<_> = sections.iter().enumerate()
+        .skip(start_col)
+        .take(end_col - start_col)
+        .collect();
+
+    if visible_sections.is_empty() {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title("Kanban Board");
+        let text = Paragraph::new("No sections to display")
+            .block(block)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(text, size);
+        return;
+    }
+
+    // Create horizontal layout for visible columns with fixed width
+    let constraints: Vec<Constraint> = visible_sections.iter()
+        .map(|_| Constraint::Length(COLUMN_WIDTH))
         .collect();
 
     let chunks = Layout::default()
@@ -53,8 +81,8 @@ fn render_kanban_columns(frame: &mut Frame, size: Rect, state: &State) {
         .constraints(constraints.as_slice())
         .split(size);
 
-    // Render each section as a column
-    for (idx, section) in sections.iter().enumerate() {
+    // Render each visible section as a column
+    for ((idx, section), chunk) in visible_sections.iter().zip(chunks.iter()) {
         let section_tasks: Vec<&crate::asana::Task> = tasks
             .iter()
             .filter(|t| {
@@ -67,11 +95,11 @@ fn render_kanban_columns(frame: &mut Frame, size: Rect, state: &State) {
 
         render_kanban_column(
             frame,
-            chunks[idx],
+            *chunk,
             section,
             &section_tasks,
-            idx == current_column,
-            if idx == current_column { Some(current_task_index) } else { None },
+            *idx == current_column,
+            if *idx == current_column { Some(current_task_index) } else { None },
         );
     }
 }

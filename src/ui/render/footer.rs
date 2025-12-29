@@ -17,6 +17,8 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
         " j/k: navigate logs, y: copy log, / or Esc: exit debug mode"
     } else if state.has_delete_confirmation() {
         " Enter: confirm delete, Esc: cancel"
+    } else if state.has_move_task() {
+        " j/k: navigate sections, Enter: move task, Esc: cancel"
     } else if *state.current_focus() == crate::state::Focus::View {
         match state.current_view() {
             crate::state::View::TaskDetail => {
@@ -26,11 +28,7 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                 " Tab/Shift+Tab: navigate fields, Enter: select, s: submit, Esc: cancel"
             }
             crate::state::View::ProjectTasks => {
-                if state.get_view_mode() == crate::state::ViewMode::Kanban {
-                    " j/k: navigate tasks, h/l: navigate columns, Enter: view, n: create, m: move, v: list view, Esc: back, q: quit"
-                } else {
-                    " j/k: navigate, Enter: view, n: create, space/x: toggle, d: delete, f: filter, v: kanban, /: search, Esc: back, q: quit"
-                }
+                " j/k: navigate tasks, h/l: navigate columns (auto-scroll), Enter: view, n: create, m: move, /: search, Esc: back, q: quit"
             }
             _ => {
                 "j k h l: navigate, s: add/remove shortcut, /: search, d: debug mode, enter: select, esc: cancel, q: quit"

@@ -183,6 +183,9 @@ impl Handler {
                     } else if state.has_delete_confirmation() {
                         debug!("Processing cancel delete confirmation event '{:?}'...", event);
                         state.cancel_delete_confirmation();
+                    } else if state.has_move_task() {
+                        debug!("Processing cancel move task event '{:?}'...", event);
+                        state.clear_move_task();
                     } else if state.is_comment_input_mode() {
                         debug!("Processing cancel comment input event '{:?}'...", event);
                         state.exit_comment_input_mode();
@@ -356,6 +359,10 @@ impl Handler {
                             }
                             _ => {}
                         }
+                    } else if state.has_move_task() {
+                        // In move task modal, navigate sections
+                        debug!("Processing previous section in move modal event '{:?}'...", event);
+                        state.previous_section();
                     } else if matches!(state.current_view(), crate::state::View::KanbanBoard) 
                         || (matches!(state.current_view(), crate::state::View::ProjectTasks) 
                             && state.get_view_mode() == crate::state::ViewMode::Kanban) {
@@ -440,6 +447,10 @@ impl Handler {
                             }
                             _ => {}
                         }
+                    } else if state.has_move_task() {
+                        // In move task modal, navigate sections
+                        debug!("Processing next section in move modal event '{:?}'...", event);
+                        state.next_section();
                     } else if matches!(state.current_view(), crate::state::View::KanbanBoard) 
                         || (matches!(state.current_view(), crate::state::View::ProjectTasks) 
                             && state.get_view_mode() == crate::state::ViewMode::Kanban) {
@@ -484,6 +495,21 @@ impl Handler {
                     } else if state.is_debug_mode() {
                         debug!("Processing exit debug mode (Enter) event '{:?}'...", event);
                         state.exit_debug_mode();
+                    } else if state.has_move_task() {
+                        // In move task modal, Enter selects the section and moves the task
+                        if let Some(task_gid) = state.get_move_task_gid() {
+                            let sections = state.get_sections();
+                            let selected_index = state.get_section_dropdown_index();
+                            if selected_index < sections.len() {
+                                let selected_section = &sections[selected_index];
+                                debug!("Moving task {} to section {}...", task_gid, selected_section.gid);
+                                state.dispatch(crate::events::network::Event::MoveTaskToSection {
+                                    task_gid: task_gid.clone(),
+                                    section_gid: selected_section.gid.clone(),
+                                });
+                                state.clear_move_task();
+                            }
+                        }
                     } else if state.has_delete_confirmation() {
                         // Confirm delete - call delete_selected_task again to actually delete
                         debug!("Processing confirm delete event '{:?}'...", event);
@@ -910,16 +936,29 @@ impl Handler {
                     code: KeyCode::Char('f'),
                     modifiers: KeyModifiers::NONE,
                 } => {
-                    if !state.is_search_mode() && !state.is_debug_mode() {
+                    if state.is_search_mode() {
+                        state.add_search_char('f');
+                    }
+                }
+                KeyEvent {
+                    code: KeyCode::Char('m'),
+                    modifiers: KeyModifiers::NONE,
+                } => {
+                    if state.is_search_mode() {
+                        state.add_search_char('m');
+                    } else if !state.is_debug_mode() {
                         match state.current_focus() {
                             Focus::View => {
-                                debug!("Processing toggle task filter event '{:?}'...", event);
-                                state.next_task_filter();
+                                if matches!(state.current_view(), crate::state::View::ProjectTasks) {
+                                    // Open section selection modal for moving task
+                                    if let Some(task) = state.get_kanban_selected_task() {
+                                        debug!("Opening move task modal for task {}...", task.gid);
+                                        state.set_move_task_gid(Some(task.gid.clone()));
+                                    }
+                                }
                             }
                             _ => {}
                         }
-                    } else if state.is_search_mode() {
-                        state.add_search_char('f');
                     }
                 }
                 KeyEvent {

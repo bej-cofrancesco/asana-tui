@@ -25,12 +25,17 @@ pub fn main(frame: &mut Frame, size: Rect, state: &mut State) {
             recently_completed(frame, size, state);
         }
         View::ProjectTasks => {
-            // Check view mode - show list or kanban
-            if state.get_view_mode() == crate::state::ViewMode::Kanban {
-                kanban::kanban(frame, size, state);
-            } else {
-                project_tasks(frame, size, state);
+            // Check if we need to show move task section selection modal
+            if state.has_move_task() {
+                // Get task name for display before borrowing state mutably
+                let task_name = state.get_kanban_selected_task()
+                    .map(|t| t.name.clone())
+                    .unwrap_or_else(|| "task".to_string());
+                render_move_task_modal(frame, size, &task_name, state);
+                return;
             }
+            // Always show kanban view
+            kanban::kanban(frame, size, state);
         }
         View::TaskDetail => {
             // Check if we need to show delete confirmation dialog
@@ -53,6 +58,11 @@ pub fn main(frame: &mut Frame, size: Rect, state: &mut State) {
         View::EditTask => {
             edit_task::edit_task(frame, size, state);
         }
+        View::MoveTaskSection => {
+            // This view is handled as a modal overlay in ProjectTasks
+            // Fallback: render kanban
+            kanban::kanban(frame, size, state);
+        }
     }
 }
 
@@ -62,88 +72,45 @@ fn welcome(frame: &mut Frame, size: Rect, state: &mut State) {
 
 fn my_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
     let block = view_block("My Tasks", state);
-    let tasks = state.get_tasks().clone();
-    let list = task_list(&tasks).block(block);
+    let tasks = state.get_filtered_tasks().to_vec();
+    
+    // Check if we have a search query and tasks are empty - show "No results" instead of "Loading..."
+    let has_search_query = !state.get_search_query().is_empty()
+        && matches!(state.get_search_target(), Some(crate::state::SearchTarget::Tasks));
+    let has_loaded_tasks = !state.get_tasks().is_empty(); // We have some tasks loaded (even if filtered out)
+    
+    let list = if tasks.is_empty() && has_search_query && has_loaded_tasks {
+        // Empty search results - show "No results found"
+        tui::widgets::List::new(vec![tui::widgets::ListItem::new("No results found")])
+            .block(block)
+    } else {
+        task_list(&tasks).block(block)
+    };
+    
     frame.render_stateful_widget(list, size, state.get_tasks_list_state());
 }
 
 fn recently_modified(frame: &mut Frame, size: Rect, state: &mut State) {
     let block = view_block("Recently Modified", state);
-    let tasks = state.get_tasks().clone();
+    let tasks = state.get_filtered_tasks().to_vec();
     let list = task_list(&tasks).block(block);
     frame.render_stateful_widget(list, size, state.get_tasks_list_state());
 }
 
 fn recently_completed(frame: &mut Frame, size: Rect, state: &mut State) {
     let block = view_block("Recently Completed", state);
-    let tasks = state.get_tasks().clone();
+    let tasks = state.get_filtered_tasks().to_vec();
     let list = task_list(&tasks).block(block);
     frame.render_stateful_widget(list, size, state.get_tasks_list_state());
 }
 
 fn project_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
-    let project_name = state
-        .get_project()
-        .map(|p| p.name.to_owned())
-        .unwrap_or_else(|| "Project".to_string());
-
-    // Add filter indicator
-    let filter_text = match state.get_task_filter() {
-        crate::state::TaskFilter::All => " [All]".to_string(),
-        crate::state::TaskFilter::Incomplete => " [Incomplete]".to_string(),
-        crate::state::TaskFilter::Completed => " [Completed]".to_string(),
-        crate::state::TaskFilter::Assignee(None) => " [Unassigned]".to_string(),
-        crate::state::TaskFilter::Assignee(Some(gid)) => {
-            // Find assignee name from workspace users
-            let assignee_name = state
-                .get_workspace_users()
-                .iter()
-                .find(|u| u.gid == gid)
-                .map(|u| u.name.as_str())
-                .unwrap_or("Unknown");
-            format!(" [Assignee: {}]", assignee_name)
-        }
+    let project = state.get_project();
+    let title = if let Some(project) = project {
+        format!("{} - Tasks", project.name)
+    } else {
+        "Tasks".to_string()
     };
-    
-    let mut title = format!("{}{}", project_name, filter_text);
-
-    // Show search in title if we're searching tasks (show "/" even if query is empty)
-    if state.is_search_mode()
-        && matches!(
-            state.get_search_target(),
-            Some(crate::state::SearchTarget::Tasks)
-        )
-    {
-        title = format!("{} /{}", title, state.get_search_query());
-    } else if !state.get_search_query().is_empty()
-        && matches!(
-            state.get_search_target(),
-            Some(crate::state::SearchTarget::Tasks)
-        )
-    {
-        // Show query even if not in search mode (after exiting search)
-        title = format!("{} /{}", title, state.get_search_query());
-    }
-
-    // Check if we need to show delete confirmation dialog
-    if state.has_delete_confirmation() {
-        // Get the actual task name from filtered tasks
-        let filtered = state.get_filtered_tasks();
-        let task_name = if let Some(selected_index) = state.get_tasks_list_state().selected() {
-            if selected_index < filtered.len() {
-                filtered[selected_index].name.as_str()
-            } else {
-                "this task"
-            }
-        } else {
-            "this task"
-        };
-
-        // Render confirmation dialog
-        render_delete_confirmation(frame, size, task_name);
-        return;
-    }
-
     let block = view_block(&title, state);
     let tasks = state.get_filtered_tasks().to_vec();
     
@@ -161,6 +128,31 @@ fn project_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
     };
     
     frame.render_stateful_widget(list, size, state.get_tasks_list_state());
+}
+
+fn task_list(tasks: &[crate::asana::Task]) -> tui::widgets::List {
+    if tasks.is_empty() {
+        return tui::widgets::List::new(vec![tui::widgets::ListItem::new("Loading...")]);
+    }
+    let items: Vec<tui::widgets::ListItem> = tasks
+        .iter()
+        .map(|t| tui::widgets::ListItem::new(t.name.to_owned()))
+        .collect();
+    let list = tui::widgets::List::new(items)
+        .block(tui::widgets::Block::default().borders(tui::widgets::Borders::NONE))
+        .style(styling::normal_text_style())
+        .highlight_style(styling::active_list_item_style());
+    list
+}
+
+fn view_block<'a>(title: &'a str, state: &mut State) -> Block<'a> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(match *state.current_focus() {
+            Focus::View => styling::active_block_border_style(),
+            _ => styling::normal_block_border_style(),
+        })
+        .title(Span::styled(title, styling::active_block_title_style()))
 }
 
 fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
@@ -214,56 +206,107 @@ fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
                 .add_modifier(Modifier::BOLD),
         )),
         Spans::from(""),
-        Spans::from(vec![
-            Span::styled("Press ", Style::default().fg(Color::Gray)),
-            Span::styled("Enter", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::styled(" to confirm, ", Style::default().fg(Color::Gray)),
-            Span::styled("Esc", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::styled(" to cancel", Style::default().fg(Color::Gray)),
-        ]),
+        Spans::from(Span::styled(
+            "This action cannot be undone.",
+            Style::default().fg(Color::Red),
+        )),
+        Spans::from(""),
     ];
 
-    // Create a prominent popup with warning styling and solid black background
-    let title = Spans::from(vec![Span::styled(
-        " ⚠  Confirm Delete ",
-        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-    )]);
-    
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(title)
-        .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
-        .style(Style::default().bg(Color::Black));
-
     let paragraph = Paragraph::new(text)
-        .block(block)
-        .wrap(Wrap { trim: true })
-        .alignment(Alignment::Center);
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Confirm Delete")
+                .border_style(styling::active_block_border_style()),
+        )
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true });
 
+    frame.render_widget(Clear, dialog_rect); // Clear the area first
     frame.render_widget(paragraph, dialog_rect);
 }
 
-fn task_list(tasks: &[crate::asana::Task]) -> tui::widgets::List<'_> {
-    if tasks.is_empty() {
-        return tui::widgets::List::new(vec![tui::widgets::ListItem::new("Loading...")]);
-    }
-    let items: Vec<tui::widgets::ListItem> = tasks
-        .iter()
-        .map(|t| tui::widgets::ListItem::new(t.name.to_owned()))
-        .collect();
-    let list = tui::widgets::List::new(items)
-        .block(tui::widgets::Block::default().borders(tui::widgets::Borders::NONE))
-        .style(styling::normal_text_style())
-        .highlight_style(styling::active_list_item_style());
-    list
-}
+fn render_move_task_modal(frame: &mut Frame, size: Rect, task_name: &str, state: &State) {
+    use crate::ui::widgets::styling;
+    use tui::{
+        layout::Alignment,
+        style::{Color, Modifier, Style},
+        text::{Span, Spans},
+        widgets::{Block, Borders, Clear, List, ListItem},
+    };
 
-fn view_block<'a>(title: &'a str, state: &mut State) -> Block<'a> {
-    Block::default()
-        .borders(Borders::ALL)
-        .border_style(match *state.current_focus() {
-            Focus::View => styling::active_block_border_style(),
-            _ => styling::normal_block_border_style(),
+    // Create a centered popup dialog
+    let dialog_width = 50.min(size.width.saturating_sub(4));
+    let dialog_height = 15.min(size.height.saturating_sub(4));
+    
+    let x = if size.width > dialog_width {
+        (size.width - dialog_width) / 2
+    } else {
+        0
+    };
+    let y = if size.height > dialog_height {
+        (size.height - dialog_height) / 2
+    } else {
+        0
+    };
+
+    let popup = Rect {
+        x,
+        y,
+        width: dialog_width,
+        height: dialog_height,
+    };
+
+    // Get sections and selected index
+    let sections = state.get_sections();
+    let selected_index = state.get_section_dropdown_index();
+
+    // Format task name - truncate if too long
+    let display_name = if task_name.len() > 35 {
+        format!("{}...", &task_name[..35])
+    } else {
+        task_name.to_string()
+    };
+
+    // Create list items
+    let items: Vec<ListItem> = sections
+        .iter()
+        .enumerate()
+        .map(|(i, section)| {
+            let style = if i == selected_index {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                styling::normal_text_style()
+            };
+            ListItem::new(Spans::from(Span::styled(&section.name, style)))
         })
-        .title(Span::styled(title, styling::active_block_title_style()))
+        .collect();
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!("Move '{}' to section", display_name))
+        .border_style(styling::active_block_border_style());
+
+    // Use ListState for proper selection display
+    let mut list_state = tui::widgets::ListState::default();
+    if !items.is_empty() {
+        list_state.select(Some(selected_index.min(items.len().saturating_sub(1))));
+    }
+
+    let list = List::new(items)
+        .block(block)
+        .style(styling::normal_text_style())
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+
+    frame.render_widget(Clear, popup); // Clear the area first
+    frame.render_stateful_widget(list, popup, &mut list_state);
 }
