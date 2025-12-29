@@ -1,6 +1,4 @@
-use tui::backend;
-
-type Frame<'a> = tui::terminal::Frame<'a, backend::CrosstermBackend<std::io::Stdout>>;
+type Frame<'a> = ratatui::Frame<'a>;
 
 mod render;
 mod widgets;

@@ -2,16 +2,16 @@ use super::form_dropdowns;
 use super::Frame;
 use crate::state::{EditFormState, State};
 use crate::ui::widgets::styling;
-use tui::{
+use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Span, Spans},
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 
 /// Render task creation form.
 ///
-pub fn create_task(frame: &mut Frame, size: Rect, state: &State) {
+pub fn create_task(frame: &mut Frame, size: Rect, state: &mut State) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -44,6 +44,8 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &State) {
         ])
         .split(chunks[1]);
 
+    let is_editing = state.is_field_editing_mode();
+
     // Name field
     render_field(
         frame,
@@ -51,27 +53,20 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &State) {
         "Name",
         state.get_form_name(),
         form_state == EditFormState::Name,
+        is_editing && form_state == EditFormState::Name,
     );
 
-    // Notes field - wrap text properly
-    if form_state == EditFormState::Notes {
-        render_notes_field(
-            frame,
-            form_chunks[1],
-            state.get_form_notes(),
-            true,
-        );
-    } else {
-        render_notes_field(
-            frame,
-            form_chunks[1],
-            state.get_form_notes(),
-            false,
-        );
-    }
+    // Notes field - use textarea for multi-line editing
+    render_notes_field(
+        frame,
+        form_chunks[1],
+        state,
+        form_state == EditFormState::Notes,
+        is_editing && form_state == EditFormState::Notes,
+    );
 
-    // Assignee field - show dropdown if focused
-    if form_state == EditFormState::Assignee {
+    // Assignee field - show dropdown if selected AND editing
+    if form_state == EditFormState::Assignee && is_editing {
         form_dropdowns::render_assignee_dropdown(frame, form_chunks[2], state);
     } else {
         let assignee_text = if let Some(assignee_gid) = state.get_form_assignee() {
@@ -82,14 +77,15 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &State) {
                 .map(|u| u.name.as_str())
                 .unwrap_or("Unknown")
         } else {
-            "None (j/k to select, Enter to confirm)"
+            "None"
         };
         render_field(
             frame,
             form_chunks[2],
-            "Assignee",
+            "Assignee (dropdown)",
             assignee_text,
-            false,
+            form_state == EditFormState::Assignee,
+            false, // Combo box doesn't show editing state when collapsed
         );
     }
 
@@ -100,10 +96,11 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &State) {
         "Due Date (YYYY-MM-DD)",
         state.get_form_due_on(),
         form_state == EditFormState::DueDate,
+        is_editing && form_state == EditFormState::DueDate,
     );
 
-    // Section field - show dropdown if focused
-    if form_state == EditFormState::Section {
+    // Section field - show dropdown if selected AND editing
+    if form_state == EditFormState::Section && is_editing {
         form_dropdowns::render_section_dropdown(frame, form_chunks[4], state);
     } else {
         let section_text = if let Some(section_gid) = state.get_form_section() {
@@ -114,14 +111,15 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &State) {
                 .map(|s| s.name.as_str())
                 .unwrap_or("Unknown")
         } else {
-            "None (j/k to select, Enter to confirm)"
+            "None"
         };
         render_field(
             frame,
             form_chunks[4],
-            "Section",
+            "Section (dropdown)",
             section_text,
-            false,
+            form_state == EditFormState::Section,
+            false, // Combo box doesn't show editing state when collapsed
         );
     }
 }
@@ -132,39 +130,67 @@ fn render_field(
     label: &str,
     value: &str,
     is_selected: bool,
+    is_editing: bool,
 ) {
-    let border_style = if is_selected {
-        styling::active_block_border_style()
+    // Different styles for navigation vs editing
+    let (border_style, title) = if is_editing {
+        // EDITING: Yellow border and indicator
+        (
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+            format!("{} [EDITING]", label),
+        )
+    } else if is_selected {
+        // SELECTED (Navigation mode): Cyan border
+        (
+            styling::active_block_border_style(), // Cyan
+            format!("{} [Press Enter to edit]", label),
+        )
     } else {
-        styling::normal_block_border_style()
+        // Not selected: Normal border
+        (styling::normal_block_border_style(), label.to_string())
     };
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(label)
+        .title(title)
         .border_style(border_style);
 
     let display_value = if value.is_empty() {
-        "Enter value..."
+        if is_editing {
+            "Type to enter value..."
+        } else {
+            "Empty"
+        }
     } else {
         value
     };
 
-    let text_style = if is_selected {
+    let text_style = if is_editing {
         Style::default()
-            .fg(Color::White)
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    } else if is_selected {
+        Style::default()
+            .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD)
     } else {
         styling::normal_text_style()
     };
 
-    let text = if is_selected {
-        Spans::from(vec![
+    let text = if is_editing {
+        Line::from(vec![
             Span::styled(display_value, text_style),
-            Span::styled("█", Style::default().fg(Color::Cyan)), // Cursor
+            Span::styled(" █", Style::default().fg(Color::Yellow)), // Editing cursor
+        ])
+    } else if is_selected {
+        Line::from(vec![
+            Span::styled("▸ ", Style::default().fg(Color::Cyan)), // Navigation indicator
+            Span::styled(display_value, text_style),
         ])
     } else {
-        Spans::from(vec![Span::styled(display_value, text_style)])
+        Line::from(vec![Span::styled(display_value, text_style)])
     };
 
     let paragraph = Paragraph::new(text).block(block);
@@ -174,48 +200,42 @@ fn render_field(
 fn render_notes_field(
     frame: &mut Frame,
     size: Rect,
-    value: &str,
+    state: &mut State,
     is_selected: bool,
+    is_editing: bool,
 ) {
-    use tui::widgets::Wrap;
-    
-    let border_style = if is_selected {
-        styling::active_block_border_style()
+    let (border_style, title) = if is_editing {
+        // EDITING: Yellow border and indicator
+        (
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+            "Notes [EDITING - Esc to exit]",
+        )
+    } else if is_selected {
+        // SELECTED (Navigation mode): Cyan border
+        (
+            styling::active_block_border_style(), // Cyan
+            "Notes [Press Enter to edit]",
+        )
     } else {
-        styling::normal_block_border_style()
+        // Not selected: Normal border
+        (styling::normal_block_border_style(), "Notes")
     };
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title("Notes")
+        .title(title)
         .border_style(border_style);
 
-    let display_value = if value.is_empty() {
-        "Enter notes..."
-    } else {
-        value
-    };
-
-    let text_style = if is_selected {
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        styling::normal_text_style()
-    };
-
-    let text = if is_selected {
-        Spans::from(vec![
-            Span::styled(display_value, text_style),
-            Span::styled("█", Style::default().fg(Color::Cyan)), // Cursor
-        ])
-    } else {
-        Spans::from(vec![Span::styled(display_value, text_style)])
-    };
-
-    let paragraph = Paragraph::new(text)
-        .block(block)
-        .wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, size);
+    // Get mutable access to textarea from state
+    let textarea = state.get_form_notes_textarea();
+    
+    // Apply block styling
+    textarea.set_block(block);
+    
+    // Render the textarea
+    frame.render_widget(textarea.widget(), size);
 }
+
 

@@ -2,18 +2,12 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{self, stdin, Write},
+    io::Write,
     path::{Path, PathBuf},
 };
 
 const FILE_NAME: &str = "config.yml";
 const DEFAULT_DIRECTORY_PATH: &str = ".config/asana-tui";
-const AUTHORIZATION_INSTRUCTIONS: &[&str] = &[
-    "Visit the Asana Developer App Console at `https://app.asana.com/`",
-    "Log in with the account you want to authorize",
-    "Create a personal access token",
-    "Copy and paste the token into the input below",
-];
 
 /// Oversees management of configuration file.
 ///
@@ -158,27 +152,6 @@ impl Config {
 
         self.create_file()?;
         Ok(())
-    }
-
-    /// Print the authorization instructions and return the personal access
-    /// token captured from stdin or an error if reading from stdin failed.
-    ///
-    fn authorize_with_user() -> Result<String> {
-        println!("\n{}\n", env!("CARGO_PKG_NAME"));
-        println!("Authorizing with Asana:\n");
-        AUTHORIZATION_INSTRUCTIONS
-            .iter()
-            .enumerate()
-            .for_each(|(index, item)| {
-                println!("    {}. {}", index + 1, item);
-            });
-        println!();
-
-        let mut access_token = String::new();
-        print!("Token >> ");
-        let _ = io::stdout().flush();
-        stdin().read_line(&mut access_token)?;
-        Ok(String::from(access_token.trim()))
     }
 
     /// Returns the path buffer for the default path to the configuration file

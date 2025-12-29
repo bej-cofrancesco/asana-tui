@@ -13,7 +13,7 @@ pub fn log(frame: &mut Frame, size: Rect, state: &mut State) {
     let title = if state.is_debug_mode() {
         "Log (DEBUG MODE: j/k: navigate, y: copy, / or Esc: exit)"
     } else {
-        "Log (Press d to enter debug mode)"
+        "Logs"
     };
 
     let block = Block::default().title(title).borders(Borders::ALL);

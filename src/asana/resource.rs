@@ -1,4 +1,4 @@
-use fake::{Dummy, Fake};
+use fake::Dummy;
 
 /// Defines user data structure.
 ///

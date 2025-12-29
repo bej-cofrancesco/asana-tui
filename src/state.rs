@@ -3,9 +3,10 @@ use crate::asana::{Project, Section, Story, Task, User, Workspace};
 use crate::events::network::Event as NetworkEvent;
 use crate::ui::SPINNER_FRAME_COUNT;
 use log::*;
+use ratatui::layout::Rect;
+use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
-use tui::layout::Rect;
-use tui::widgets::ListState;
+use tui_textarea::{Input as TextAreaInput, Key as TextAreaKey, TextArea};
 
 /// Specifying the different foci.
 ///
@@ -100,6 +101,7 @@ pub struct State {
     project: Option<Project>,
     projects_list_state: ListState,
     tasks_list_state: ListState,
+    comments_list_state: ListState,
     starred_projects: HashSet<String>,              // GIDs
     starred_project_names: HashMap<String, String>, // GID -> Name
     search_query: String,
@@ -120,6 +122,7 @@ pub struct State {
     view_mode: ViewMode,                 // List or Kanban view
     edit_mode: bool,                     // Whether in edit mode
     edit_form_state: Option<EditFormState>, // Current form field being edited
+    field_editing_mode: bool,            // Whether actively editing a field (vs navigating)
     kanban_column_index: usize,          // Current column in kanban view
     kanban_task_index: usize,            // Current task index in selected column
     kanban_horizontal_scroll: usize,     // Horizontal scroll offset for kanban columns
@@ -131,11 +134,12 @@ pub struct State {
     current_task_panel: TaskDetailPanel, // Current panel in task detail view
     // Form input fields
     form_name: String,
-    form_notes: String,
-    form_assignee: Option<String>, // GID of selected assignee
-    form_assignee_search: String,  // Search text for filtering assignees
-    form_due_on: String,           // Date string
-    form_section: Option<String>,  // GID of selected section
+    form_notes_textarea: TextArea<'static>, // TextArea for multi-line notes editing
+    form_assignee: Option<String>,          // GID of selected assignee
+    form_assignee_search: String,           // Search text for filtering assignees
+    form_due_on: String,                    // Date string
+    form_section: Option<String>,           // GID of selected section
+    form_section_search: String,            // Search text for filtering sections
     // Original form values (for tracking changes)
     original_form_name: String,
     original_form_notes: String,
@@ -190,6 +194,7 @@ impl Default for State {
             project: None,
             projects_list_state: ListState::default(),
             tasks_list_state: ListState::default(),
+            comments_list_state: ListState::default(),
             starred_projects: HashSet::new(),
             starred_project_names: HashMap::new(),
             search_query: String::new(),
@@ -210,6 +215,7 @@ impl Default for State {
             view_mode: ViewMode::Kanban,
             edit_mode: false,
             edit_form_state: None,
+            field_editing_mode: false,
             kanban_column_index: 0,
             kanban_task_index: 0,
             kanban_horizontal_scroll: 0,
@@ -220,11 +226,12 @@ impl Default for State {
             notes_scroll_offset: 0,
             current_task_panel: TaskDetailPanel::Details,
             form_name: String::new(),
-            form_notes: String::new(),
+            form_notes_textarea: TextArea::default(),
             form_assignee: None,
             form_assignee_search: String::new(),
             form_due_on: String::new(),
             form_section: None,
+            form_section_search: String::new(),
             original_form_name: String::new(),
             original_form_notes: String::new(),
             original_form_assignee: None,
@@ -653,6 +660,12 @@ impl State {
         &mut self.tasks_list_state
     }
 
+    /// Get comments list state.
+    ///
+    pub fn get_comments_list_state(&mut self) -> &mut ListState {
+        &mut self.comments_list_state
+    }
+
     /// Get shortcuts list state.
     ///
     pub fn get_shortcuts_list_state(&mut self) -> &mut ListState {
@@ -768,10 +781,21 @@ impl State {
         self.delete_confirmation.is_some()
     }
 
-    /// Set delete confirmation for a task GID (used from detail view).
+    /// Set delete confirmation for a task GID (used from detail view and kanban view).
     ///
     pub fn set_delete_confirmation(&mut self, task_gid: String) -> &mut Self {
         self.delete_confirmation = Some(task_gid);
+        self
+    }
+
+    /// Confirm and delete the task with pending confirmation (works for all views).
+    ///
+    pub fn confirm_delete_task(&mut self) -> &mut Self {
+        if let Some(task_gid) = &self.delete_confirmation {
+            let gid = task_gid.clone();
+            self.delete_confirmation = None;
+            self.dispatch(NetworkEvent::DeleteTask { gid });
+        }
         self
     }
 
@@ -883,8 +907,20 @@ impl State {
     ///
     pub fn set_task_stories(&mut self, stories: Vec<Story>) -> &mut Self {
         self.task_stories = stories;
-        // Auto-scroll to bottom to show newest comments
-        self.scroll_comments_to_bottom();
+        // Initialize comments list state - select first comment (oldest)
+        let comments: Vec<&Story> = self
+            .task_stories
+            .iter()
+            .filter(|s| match &s.resource_subtype {
+                Some(subtype) => subtype == "comment_added",
+                None => s.created_by.is_some(),
+            })
+            .collect();
+        if !comments.is_empty() {
+            self.comments_list_state.select(Some(0));
+        } else {
+            self.comments_list_state.select(None);
+        }
         self
     }
 
@@ -899,9 +935,7 @@ impl State {
     }
 
     pub fn scroll_comments_down(&mut self) -> &mut Self {
-        // For bottom-aligned scrolling, "down" (j key) = see newer comments = decrease index
-        // Index 0 = newest (last item), higher = older
-        // Filter for actual comments to get the correct count
+        // Use ListState for proper navigation
         let comments: Vec<&Story> = self
             .task_stories
             .iter()
@@ -913,26 +947,21 @@ impl State {
 
         let total_comments = comments.len();
         if total_comments > 0 {
-            // Clamp offset to valid range first (in case it got out of bounds)
-            self.comments_scroll_offset = self.comments_scroll_offset % total_comments;
-
-            // Wrap around using modulo arithmetic (like other lists)
-            // If at 0, wrap to last item; otherwise decrease
-            if self.comments_scroll_offset == 0 {
-                self.comments_scroll_offset = total_comments.saturating_sub(1);
+            let current = self.comments_list_state.selected().unwrap_or(0);
+            let next = if current >= total_comments.saturating_sub(1) {
+                0 // Wrap to top
             } else {
-                self.comments_scroll_offset -= 1;
-            }
+                current + 1
+            };
+            self.comments_list_state.select(Some(next));
         } else {
-            // No comments, reset to 0
-            self.comments_scroll_offset = 0;
+            self.comments_list_state.select(None);
         }
         self
     }
 
     pub fn scroll_comments_up(&mut self) -> &mut Self {
-        // For bottom-aligned scrolling, "up" (k key) = see older comments = increase index
-        // Filter for actual comments to get the correct count
+        // Use ListState for proper navigation
         let comments: Vec<&Story> = self
             .task_stories
             .iter()
@@ -944,27 +973,16 @@ impl State {
 
         let total_comments = comments.len();
         if total_comments > 0 {
-            // Clamp offset to valid range first (in case it got out of bounds)
-            self.comments_scroll_offset = self.comments_scroll_offset % total_comments;
-
-            // Wrap around using modulo arithmetic (like other lists)
-            // If at max, wrap to 0; otherwise increase
-            let max_index = total_comments.saturating_sub(1);
-            if self.comments_scroll_offset >= max_index {
-                self.comments_scroll_offset = 0;
+            let current = self.comments_list_state.selected().unwrap_or(0);
+            let prev = if current == 0 {
+                total_comments.saturating_sub(1) // Wrap to bottom
             } else {
-                self.comments_scroll_offset += 1;
-            }
+                current - 1
+            };
+            self.comments_list_state.select(Some(prev));
         } else {
-            // No comments, reset to 0
-            self.comments_scroll_offset = 0;
+            self.comments_list_state.select(None);
         }
-        self
-    }
-
-    pub fn scroll_comments_to_bottom(&mut self) -> &mut Self {
-        // For bottom alignment, index 0 means newest (last item)
-        self.comments_scroll_offset = 0;
         self
     }
 
@@ -1375,6 +1393,26 @@ impl State {
         self
     }
 
+    /// Check if actively editing a field (vs navigating between fields).
+    ///
+    pub fn is_field_editing_mode(&self) -> bool {
+        self.field_editing_mode
+    }
+
+    /// Enter field editing mode (start editing the current field).
+    ///
+    pub fn enter_field_editing_mode(&mut self) -> &mut Self {
+        self.field_editing_mode = true;
+        self
+    }
+
+    /// Exit field editing mode (return to navigation mode).
+    ///
+    pub fn exit_field_editing_mode(&mut self) -> &mut Self {
+        self.field_editing_mode = false;
+        self
+    }
+
     /// Enter comment input mode.
     ///
     pub fn enter_comment_input_mode(&mut self) -> &mut Self {
@@ -1500,28 +1538,27 @@ impl State {
 
     /// Get form notes.
     ///
-    pub fn get_form_notes(&self) -> &str {
-        &self.form_notes
+    /// Get form notes as string.
+    ///
+    pub fn get_form_notes(&self) -> String {
+        self.form_notes_textarea
+            .lines()
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
-    /// Set form notes.
+    /// Get form notes textarea (mutable).
+    ///
+    pub fn get_form_notes_textarea(&mut self) -> &mut TextArea<'static> {
+        &mut self.form_notes_textarea
+    }
+
+    /// Set form notes from string.
     ///
     pub fn set_form_notes(&mut self, notes: String) -> &mut Self {
-        self.form_notes = notes;
-        self
-    }
-
-    /// Add character to form notes.
-    ///
-    pub fn add_form_notes_char(&mut self, c: char) -> &mut Self {
-        self.form_notes.push(c);
-        self
-    }
-
-    /// Remove last character from form notes.
-    ///
-    pub fn remove_form_notes_char(&mut self) -> &mut Self {
-        self.form_notes.pop();
+        self.form_notes_textarea = TextArea::from(notes.lines().collect::<Vec<_>>());
         self
     }
 
@@ -1713,14 +1750,56 @@ impl State {
         self
     }
 
+    /// Get filtered sections based on search text
+    pub fn get_filtered_sections(&self) -> Vec<Section> {
+        let search = self.form_section_search.to_lowercase();
+        if search.is_empty() {
+            self.sections.clone()
+        } else {
+            self.sections
+                .iter()
+                .filter(|s| s.name.to_lowercase().contains(&search))
+                .cloned()
+                .collect()
+        }
+    }
+
+    pub fn add_section_search_char(&mut self, c: char) -> &mut Self {
+        self.form_section_search.push(c);
+        // Reset dropdown index when search changes
+        self.section_dropdown_index = 0;
+        self
+    }
+
+    pub fn backspace_section_search(&mut self) -> &mut Self {
+        self.form_section_search.pop();
+        // Reset dropdown index when search changes
+        self.section_dropdown_index = 0;
+        self
+    }
+
+    pub fn get_section_search(&self) -> &str {
+        &self.form_section_search
+    }
+
+    pub fn clear_section_search(&mut self) -> &mut Self {
+        self.form_section_search.clear();
+        self.section_dropdown_index = 0;
+        self
+    }
+
     /// Initialize section dropdown index to match currently selected section (if any).
     /// This ensures the selected section is shown when entering the dropdown.
     pub fn init_section_dropdown_index(&mut self) -> &mut Self {
         if let Some(selected_gid) = &self.form_section {
-            if let Some(index) = self.sections.iter().position(|s| &s.gid == selected_gid) {
+            let filtered_sections = self.get_filtered_sections();
+            if let Some(index) = filtered_sections
+                .iter()
+                .position(|s| &s.gid == selected_gid)
+            {
                 self.section_dropdown_index = index;
             } else {
-                // Selected section not in list, reset to 0
+                // Selected section not in filtered list, reset to 0
                 self.section_dropdown_index = 0;
             }
         } else {
@@ -1731,28 +1810,29 @@ impl State {
     }
 
     pub fn next_section(&mut self) -> &mut Self {
-        let max = self.sections.len();
-        if max > 0 {
-            self.section_dropdown_index = (self.section_dropdown_index + 1) % max;
+        let sections = self.get_filtered_sections();
+        if !sections.is_empty() {
+            self.section_dropdown_index = (self.section_dropdown_index + 1) % sections.len();
         }
         self
     }
 
     pub fn previous_section(&mut self) -> &mut Self {
-        let max = self.sections.len();
-        if max > 0 {
-            self.section_dropdown_index = if self.section_dropdown_index == 0 {
-                max - 1
+        let sections = self.get_filtered_sections();
+        if !sections.is_empty() {
+            if self.section_dropdown_index == 0 {
+                self.section_dropdown_index = sections.len() - 1;
             } else {
-                self.section_dropdown_index - 1
-            };
+                self.section_dropdown_index -= 1;
+            }
         }
         self
     }
 
     pub fn select_current_section(&mut self) -> &mut Self {
-        if let Some(section) = self.sections.get(self.section_dropdown_index) {
-            self.form_section = Some(section.gid.clone());
+        let sections = self.get_filtered_sections();
+        if !sections.is_empty() && self.section_dropdown_index < sections.len() {
+            self.form_section = Some(sections[self.section_dropdown_index].gid.clone());
         } else {
             warn!("No section found at index {}", self.section_dropdown_index);
         }
@@ -1763,12 +1843,14 @@ impl State {
     ///
     pub fn clear_form(&mut self) -> &mut Self {
         self.form_name.clear();
-        self.form_notes.clear();
+        self.form_notes_textarea = TextArea::default();
         self.form_assignee = None;
         self.form_assignee_search.clear();
         self.form_due_on.clear();
         self.form_section = None;
+        self.form_section_search.clear();
         self.edit_form_state = None;
+        self.field_editing_mode = false;
         self.assignee_dropdown_index = 0;
         self.section_dropdown_index = 0;
         self
@@ -1780,7 +1862,7 @@ impl State {
     pub fn init_edit_form(&mut self, task: &Task) -> &mut Self {
         // Set current form values
         self.form_name = task.name.clone();
-        self.form_notes = task.notes.clone().unwrap_or_default();
+        self.set_form_notes(task.notes.clone().unwrap_or_default());
         self.form_assignee = task.assignee.as_ref().map(|u| u.gid.clone());
         self.form_due_on = task.due_on.clone().unwrap_or_default();
         self.form_section = task.section.as_ref().map(|s| s.gid.clone());

@@ -1,14 +1,15 @@
 use super::*;
 use crate::state::State;
-use tui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Render all to terminal frame according to state.
 ///
 pub fn all(frame: &mut Frame, state: &mut State) {
+    let size = frame.size();
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)].as_ref())
-        .split(frame.size());
+        .split(size);
 
     let columns = Layout::default()
         .direction(Direction::Horizontal)

@@ -153,19 +153,17 @@ impl Asana {
             .into_iter()
             .map(|t| {
                 // Extract section from memberships in extra fields
-                let section = if let Some(memberships) = t.extra.get("memberships").and_then(|m| m.as_array()) {
-                    memberships
-                        .iter()
-                        .find_map(|m| {
-                            m.get("section")
-                                .and_then(|s| s.as_object())
-                                .and_then(|s| {
-                                    Some(Section {
-                                        gid: s.get("gid")?.as_str()?.to_string(),
-                                        name: s.get("name")?.as_str()?.to_string(),
-                                    })
-                                })
+                let section = if let Some(memberships) =
+                    t.extra.get("memberships").and_then(|m| m.as_array())
+                {
+                    memberships.iter().find_map(|m| {
+                        m.get("section").and_then(|s| s.as_object()).and_then(|s| {
+                            Some(Section {
+                                gid: s.get("gid")?.as_str()?.to_string(),
+                                name: s.get("name")?.as_str()?.to_string(),
+                            })
                         })
+                    })
                 } else {
                     None
                 };
@@ -180,7 +178,11 @@ impl Asana {
                             Some(User {
                                 gid: gid_val.to_string(),
                                 name: name_val.to_string(),
-                                email: assignee_obj.get("email").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                email: assignee_obj
+                                    .get("email")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
                             })
                         } else {
                             None
@@ -418,7 +420,13 @@ impl Asana {
             created_at: task_data.created_at,
             modified_at: task_data.modified_at,
             num_subtasks: subtasks.len(),
-            num_comments: stories.len(),
+            num_comments: stories
+                .iter()
+                .filter(|s| match &s.resource_subtype {
+                    Some(subtype) => subtype == "comment_added",
+                    None => s.created_by.is_some(),
+                })
+                .count(),
         })
     }
 
@@ -501,7 +509,6 @@ impl Asana {
             created_by: Option<UserModel>,
             resource_subtype: Option<String>,
         } UserModel);
-        model!(TaskModel "tasks" { name: String });
 
         // Use relational endpoint: GET /tasks/{task_gid}/stories
         let response = self
@@ -1020,7 +1027,7 @@ mod tests {
 
     #[tokio::test]
     async fn projects_success() -> Result<()> {
-        let token: Uuid = UUIDv4.fake();
+        let token: Uuid = UUIDv4.fake_with_rng(&mut rand::thread_rng());
         let workspace: Workspace = Faker.fake();
         let projects: [Project; 2] = Faker.fake();
 

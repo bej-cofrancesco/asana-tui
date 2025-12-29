@@ -2,6 +2,8 @@ use crate::asana::Asana;
 use crate::state::State;
 use anyhow::{anyhow, Result};
 use log::*;
+use regex::Regex;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -180,9 +182,10 @@ impl<'a> Handler<'a> {
                 self.update_task_fields(gid, name, notes, assignee, due_on, section, completed)
                     .await?
             }
-            Event::MoveTaskToSection { task_gid, section_gid } => {
-                self.move_task_to_section(task_gid, section_gid).await?
-            }
+            Event::MoveTaskToSection {
+                task_gid,
+                section_gid,
+            } => self.move_task_to_section(task_gid, section_gid).await?,
         }
         Ok(())
     }
@@ -374,12 +377,27 @@ impl<'a> Handler<'a> {
     ///
     async fn get_task_detail(&mut self, task_gid: String) -> Result<()> {
         info!("Fetching full details for task {}...", task_gid);
-        let task = self.asana.get_task(&task_gid).await?;
+        let mut task = self.asana.get_task(&task_gid).await?;
+
+        // Process task notes - replace profile URLs with @username when data comes from API
+        let state = self.state.lock().await;
+        let users = state.get_workspace_users();
+        let user_map: HashMap<String, String> = users
+            .iter()
+            .map(|u| (u.gid.clone(), u.name.clone()))
+            .collect();
+        drop(state);
+
+        // Process notes if present
+        if let Some(ref mut notes) = task.notes {
+            *notes = Self::replace_profile_urls(notes, &user_map);
+        }
+
         let task_gid_clone = task_gid.clone();
         let mut state = self.state.lock().await;
         state.set_task_detail(task);
         drop(state);
-        // Also load stories/comments
+        // Also load stories/comments (which will also be processed)
         self.get_task_stories(task_gid_clone).await?;
         info!("Task details loaded successfully.");
         Ok(())
@@ -396,11 +414,58 @@ impl<'a> Handler<'a> {
         Ok(())
     }
 
+    /// Replace profile URLs with "@ person name" in text.
+    /// URLs like "profiles/123456" or "https://app.asana.com/0/profile/123456" become "@ person name"
+    fn replace_profile_urls(text: &str, user_map: &HashMap<String, String>) -> String {
+        // Pattern: https://app.asana.com/0/profile/{gid} or profiles/{gid}
+        let profile_patterns = vec![
+            r"https://app\.asana\.com/0/profile/(\d+)",
+            r"profiles/(\d+)",
+        ];
+
+        let mut result = text.to_string();
+        for pattern in profile_patterns {
+            let re = Regex::new(pattern).unwrap();
+            result = re
+                .replace_all(&result, |caps: &regex::Captures| {
+                    if let Some(gid) = caps.get(1) {
+                        // Extract user ID from URL (split by / and take last part)
+                        let user_id = gid.as_str();
+                        if let Some(user_name) = user_map.get(user_id) {
+                            format!("@ {}", user_name)
+                        } else {
+                            // Keep original if user not found
+                            caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string()
+                        }
+                    } else {
+                        caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string()
+                    }
+                })
+                .to_string();
+        }
+        result
+    }
+
     /// Get task stories/comments.
     ///
     async fn get_task_stories(&mut self, task_gid: String) -> Result<()> {
         info!("Fetching stories/comments for task {}...", task_gid);
-        let stories = self.asana.get_task_stories(&task_gid).await?;
+        let mut stories = self.asana.get_task_stories(&task_gid).await?;
+
+        // Process URLs when data comes from API - replace profile URLs with @username
+        let state = self.state.lock().await;
+        let users = state.get_workspace_users();
+        let user_map: HashMap<String, String> = users
+            .iter()
+            .map(|u| (u.gid.clone(), u.name.clone()))
+            .collect();
+        drop(state);
+
+        // Process each story's text to replace profile URLs
+        for story in &mut stories {
+            story.text = Self::replace_profile_urls(&story.text, &user_map);
+        }
+
         let mut state = self.state.lock().await;
         state.set_task_stories(stories);
         info!("Stories/comments loaded successfully.");

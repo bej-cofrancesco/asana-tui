@@ -10,13 +10,13 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use log::*;
-use std::io::{self, stdout};
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tui::{
+use ratatui::{
     backend::{Backend, CrosstermBackend},
     Terminal,
 };
+use std::io::{self, stdout};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tui_logger::{init_logger, set_default_level};
 
 pub type NetworkEventSender = std::sync::mpsc::Sender<NetworkEvent>;
@@ -150,16 +150,6 @@ impl App {
                 }
             }
         });
-    }
-
-    /// Start a separate thread for asynchronous state mutations.
-    ///
-    fn start_network(&self, net_receiver: NetworkEventReceiver) -> Result<()> {
-        let access_token = self
-            .access_token
-            .clone()
-            .ok_or(anyhow!("No access token"))?;
-        self.start_network_with_token(net_receiver, access_token)
     }
 
     fn start_network_with_token(

@@ -1,10 +1,10 @@
 use super::Frame;
 use crate::state::State;
 use crate::ui::color::*;
-use tui::{
+use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Span, Spans},
+    text::{Line, Span},
     widgets::Paragraph,
 };
 
@@ -25,7 +25,13 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                 " h/l: switch panel, j/k: scroll, e: edit, d: delete, c: comment, Esc: back, q: quit"
             }
             crate::state::View::CreateTask | crate::state::View::EditTask => {
-                " Tab/Shift+Tab: navigate fields, Enter: select, s: submit, Esc: cancel"
+                if state.is_field_editing_mode() {
+                    // When actively editing a field
+                    " Type to edit, Esc: back to navigation, Enter: select (dropdowns)"
+                } else {
+                    // When navigating between fields
+                    " j/k: navigate fields, Enter: edit field, s: submit, Esc: cancel"
+                }
             }
             crate::state::View::ProjectTasks => {
                 " j/k: navigate tasks, h/l: navigate columns (auto-scroll), Enter: view, n: create, m: move, /: search, Esc: back, q: quit"
@@ -40,7 +46,7 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
 
     let controls_content = if state.is_search_mode() {
         // Show search mode indicator with different styling
-        Spans::from(vec![
+        Line::from(vec![
             Span::styled(
                 "SEARCH:",
                 Style::default()
@@ -52,7 +58,7 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
         ])
     } else if state.is_debug_mode() {
         // Show debug mode indicator with different styling
-        Spans::from(vec![
+        Line::from(vec![
             Span::styled(
                 "DEBUG:",
                 Style::default()
@@ -63,7 +69,7 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
             Span::styled(controls_text, Style::default().fg(YELLOW)),
         ])
     } else if state.has_delete_confirmation() {
-        Spans::from(vec![
+        Line::from(vec![
             Span::styled(
                 "DELETE:",
                 Style::default()
@@ -73,10 +79,37 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
             ),
             Span::styled(controls_text, Style::default().fg(YELLOW)),
         ])
+    } else if state.has_move_task() {
+        Line::from(vec![
+            Span::styled(
+                "MOVE:",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(controls_text, Style::default().fg(YELLOW)),
+        ])
+    } else if matches!(
+        state.current_view(),
+        crate::state::View::CreateTask | crate::state::View::EditTask
+    ) && state.is_field_editing_mode()
+    {
+        // Show EDIT mode indicator
+        Line::from(vec![
+            Span::styled(
+                "EDIT:",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(controls_text, Style::default().fg(YELLOW)),
+        ])
     } else if *state.current_focus() == crate::state::Focus::View
         && matches!(state.current_view(), crate::state::View::ProjectTasks)
     {
-        Spans::from(vec![
+        Line::from(vec![
             Span::styled(
                 "TASKS:",
                 Style::default()
@@ -87,7 +120,7 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
             Span::styled(controls_text, Style::default().fg(YELLOW)),
         ])
     } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
-        Spans::from(vec![
+        Line::from(vec![
             Span::styled(
                 "TASK:",
                 Style::default()
@@ -98,7 +131,7 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
             Span::styled(controls_text, Style::default().fg(YELLOW)),
         ])
     } else {
-        Spans::from(vec![
+        Line::from(vec![
             Span::styled(
                 "NORMAL:",
                 Style::default()
@@ -112,21 +145,55 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
 
     let controls_widget = Paragraph::new(controls_content).alignment(Alignment::Left);
 
-    let version_content = Spans::from(vec![Span::styled(
-        format!(" {}", env!("CARGO_PKG_VERSION")),
-        Style::default().fg(GREEN),
-    )]);
-    let version_content_width = version_content.width();
-    let version_widget = Paragraph::new(version_content).alignment(Alignment::Right);
+    // Show search query in footer when searching tasks, otherwise show version
+    let right_content = if state.is_search_mode()
+        && matches!(
+            state.get_search_target(),
+            Some(crate::state::SearchTarget::Tasks)
+        ) {
+        // Show search query
+        let search_text = if state.get_search_query().is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}", state.get_search_query())
+        };
+        Line::from(vec![Span::styled(
+            search_text,
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+        )])
+    } else if !state.get_search_query().is_empty()
+        && matches!(
+            state.get_search_target(),
+            Some(crate::state::SearchTarget::Tasks)
+        )
+    {
+        // Show query even if not in search mode (after exiting search)
+        Line::from(vec![Span::styled(
+            format!("/{}", state.get_search_query()),
+            Style::default().fg(Color::DarkGray),
+        )])
+    } else {
+        // Show version number
+        Line::from(vec![Span::styled(
+            format!(" {}", env!("CARGO_PKG_VERSION")),
+            Style::default().fg(GREEN),
+        )])
+    };
+
+    let right_content_width = right_content.width();
+    let right_widget = Paragraph::new(right_content).alignment(Alignment::Right);
 
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(1),
-            Constraint::Length(version_content_width.try_into().unwrap()),
+            Constraint::Length(right_content_width.try_into().unwrap()),
         ])
         .split(size);
 
     frame.render_widget(controls_widget, columns[0]);
-    frame.render_widget(version_widget, columns[1]);
+    frame.render_widget(right_widget, columns[1]);
 }
