@@ -1,9 +1,9 @@
 use super::Frame;
 use crate::state::State;
 use crate::ui::widgets::styling;
-use tui::{
+use ratatui::{
     layout::Rect,
-    text::{Span, Spans},
+    text::{Line, Span},
     widgets::{Block, Borders, List, ListItem},
 };
 
@@ -30,7 +30,7 @@ pub fn log(frame: &mut Frame, size: Rect, state: &mut State) {
                 } else {
                     styling::normal_text_style()
                 };
-                ListItem::new(Spans::from(vec![Span::styled(entry.clone(), style)]))
+                ListItem::new(Line::from(vec![Span::styled(entry.clone(), style)]))
             })
             .collect();
 
@@ -40,7 +40,7 @@ pub fn log(frame: &mut Frame, size: Rect, state: &mut State) {
             .block(block);
 
         // Create a dummy ListState for rendering
-        let mut list_state = tui::widgets::ListState::default();
+        let mut list_state = ratatui::widgets::ListState::default();
         list_state.select(Some(state.get_debug_index()));
         frame.render_stateful_widget(list, size, &mut list_state);
     } else {
@@ -50,7 +50,7 @@ pub fn log(frame: &mut Frame, size: Rect, state: &mut State) {
         let items: Vec<ListItem> = debug_entries
             .iter()
             .map(|entry| {
-                ListItem::new(Spans::from(vec![Span::styled(
+                ListItem::new(Line::from(vec![Span::styled(
                     entry.clone(),
                     styling::normal_text_style(),
                 )]))
@@ -63,7 +63,7 @@ pub fn log(frame: &mut Frame, size: Rect, state: &mut State) {
 
         // Use stateful widget to control scroll position
         // Set selection to the last item (bottom) to auto-scroll
-        let mut list_state = tui::widgets::ListState::default();
+        let mut list_state = ratatui::widgets::ListState::default();
         if !debug_entries.is_empty() {
             list_state.select(Some(debug_entries.len() - 1));
         }

@@ -1,10 +1,10 @@
 use super::Frame;
 use crate::state::State;
 use crate::ui::widgets::styling;
-use tui::{
+use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Span, Spans},
+    text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
 
@@ -196,7 +196,7 @@ fn render_kanban_column(
             }
             
             // Split text into multiple lines that fit within available width
-            let mut lines: Vec<Spans> = vec![];
+            let mut lines: Vec<Line> = vec![];
             let words: Vec<String> = full_text.split_whitespace().map(|s| s.to_string()).collect();
             let mut current_line = vec![];
             let mut current_line_len = 0;
@@ -216,7 +216,7 @@ fn render_kanban_column(
                 } else {
                     // Word doesn't fit, start new line
                     if !current_line.is_empty() {
-                        lines.push(Spans::from(current_line));
+                        lines.push(Line::from(current_line));
                     }
                     current_line = vec![Span::styled(word.clone(), name_style)];
                     current_line_len = word_len;
@@ -225,12 +225,12 @@ fn render_kanban_column(
             
             // Add the last line if it's not empty
             if !current_line.is_empty() {
-                lines.push(Spans::from(current_line));
+                lines.push(Line::from(current_line));
             }
             
             // If no lines were created (empty task name), create at least one line
             if lines.is_empty() {
-                lines.push(Spans::from(vec![Span::styled("", name_style)]));
+                lines.push(Line::from(vec![Span::styled("", name_style)]));
             }
             
             ListItem::new(lines)
@@ -243,7 +243,7 @@ fn render_kanban_column(
         .highlight_style(styling::active_list_item_style());
 
     // Create list state with selection
-    let mut list_state = tui::widgets::ListState::default();
+    let mut list_state = ratatui::widgets::ListState::default();
     if is_selected {
         if let Some(idx) = selected_task_index {
             if idx < tasks.len() {
@@ -324,7 +324,7 @@ fn render_kanban_details(frame: &mut Frame, size: Rect, state: &State) {
     let mut lines = vec![];
     
     // Task name (bold)
-    lines.push(Spans::from(vec![
+    lines.push(Line::from(vec![
         Span::styled(
             &task.name,
             Style::default()
@@ -332,10 +332,10 @@ fn render_kanban_details(frame: &mut Frame, size: Rect, state: &State) {
                 .add_modifier(Modifier::BOLD),
         ),
     ]));
-    lines.push(Spans::from(vec![Span::raw("")])); // Empty line
+    lines.push(Line::from(vec![Span::raw("")])); // Empty line
     
     // Status
-    lines.push(Spans::from(vec![
+    lines.push(Line::from(vec![
         Span::styled("Status: ", Style::default().fg(Color::Yellow)),
         Span::styled(
             if task.completed { "Completed" } else { "Incomplete" },
@@ -344,19 +344,19 @@ fn render_kanban_details(frame: &mut Frame, size: Rect, state: &State) {
     ]));
     
     // Section
-    lines.push(Spans::from(vec![
+    lines.push(Line::from(vec![
         Span::styled("Section: ", Style::default().fg(Color::Yellow)),
         Span::styled(&section.name, styling::normal_text_style()),
     ]));
     
     // Assignee
     if let Some(ref assignee) = task.assignee {
-        lines.push(Spans::from(vec![
+        lines.push(Line::from(vec![
             Span::styled("Assignee: ", Style::default().fg(Color::Yellow)),
             Span::styled(&assignee.name, styling::normal_text_style()),
         ]));
     } else {
-        lines.push(Spans::from(vec![
+        lines.push(Line::from(vec![
             Span::styled("Assignee: ", Style::default().fg(Color::Yellow)),
             Span::styled("Unassigned", Style::default().fg(Color::DarkGray)),
         ]));
@@ -364,7 +364,7 @@ fn render_kanban_details(frame: &mut Frame, size: Rect, state: &State) {
     
     // Due date
     if let Some(ref due_on) = task.due_on {
-        lines.push(Spans::from(vec![
+        lines.push(Line::from(vec![
             Span::styled("Due: ", Style::default().fg(Color::Yellow)),
             Span::styled(due_on, styling::normal_text_style()),
         ]));
@@ -373,20 +373,20 @@ fn render_kanban_details(frame: &mut Frame, size: Rect, state: &State) {
     // Notes
     if let Some(ref notes) = task.notes {
         if !notes.trim().is_empty() {
-            lines.push(Spans::from(vec![Span::raw("")])); // Empty line
-            lines.push(Spans::from(vec![
+            lines.push(Line::from(vec![Span::raw("")])); // Empty line
+            lines.push(Line::from(vec![
                 Span::styled("Notes:", Style::default().fg(Color::Yellow)),
             ]));
             // Wrap notes text
             let notes_lines: Vec<&str> = notes.lines().collect();
             for line in notes_lines.iter().take(10) { // Limit to 10 lines
-                lines.push(Spans::from(vec![Span::styled(
+                lines.push(Line::from(vec![Span::styled(
                     *line,
                     styling::normal_text_style(),
                 )]));
             }
             if notes_lines.len() > 10 {
-                lines.push(Spans::from(vec![Span::styled(
+                lines.push(Line::from(vec![Span::styled(
                     "...",
                     Style::default().fg(Color::DarkGray),
                 )]));
@@ -395,15 +395,15 @@ fn render_kanban_details(frame: &mut Frame, size: Rect, state: &State) {
     }
     
     // Subtasks and comments count
-    lines.push(Spans::from(vec![Span::raw("")])); // Empty line
+    lines.push(Line::from(vec![Span::raw("")])); // Empty line
     if task.num_subtasks > 0 {
-        lines.push(Spans::from(vec![
+        lines.push(Line::from(vec![
             Span::styled("Subtasks: ", Style::default().fg(Color::Yellow)),
             Span::styled(task.num_subtasks.to_string(), styling::normal_text_style()),
         ]));
     }
     if task.num_comments > 0 {
-        lines.push(Spans::from(vec![
+        lines.push(Line::from(vec![
             Span::styled("Comments: ", Style::default().fg(Color::Yellow)),
             Span::styled(task.num_comments.to_string(), styling::normal_text_style()),
         ]));

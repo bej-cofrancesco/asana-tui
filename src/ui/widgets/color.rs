@@ -1,4 +1,4 @@
-use tui::style::Color;
+use ratatui::style::Color;
 
 pub const YELLOW: Color = Color::Rgb(255, 210, 0);
 pub const PINK: Color = Color::Rgb(255, 109, 146);

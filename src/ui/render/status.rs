@@ -2,9 +2,9 @@ use super::widgets::spinner;
 use super::Frame;
 use crate::state::{Focus, Menu, State};
 use crate::ui::widgets::styling;
-use tui::{
+use ratatui::{
     layout::Rect,
-    text::{Span, Spans},
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 
@@ -35,15 +35,15 @@ pub fn status(frame: &mut Frame, size: Rect, state: &mut State) {
     let user = state.get_user().unwrap();
     let workspace = state.get_active_workspace().unwrap();
     let text = vec![
-        Spans::from(vec![Span::styled(
+        Line::from(vec![Span::styled(
             format!("User: {}", &user.name),
             styling::normal_text_style(),
         )]),
-        Spans::from(vec![Span::styled(
+        Line::from(vec![Span::styled(
             format!("Email: {}", &user.email),
             styling::normal_text_style(),
         )]),
-        Spans::from(vec![Span::styled(
+        Line::from(vec![Span::styled(
             format!("Workspace: {}", &workspace.name),
             styling::normal_text_style(),
         )]),

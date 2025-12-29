@@ -2,7 +2,7 @@ use super::widgets::spinner;
 use super::Frame;
 use crate::state::{Focus, Menu, State};
 use crate::ui::widgets::styling;
-use tui::{
+use ratatui::{
     layout::Rect,
     text::Span,
     widgets::{Block, Borders, List, ListItem},
@@ -14,7 +14,6 @@ const BLOCK_TITLE: &str = "Shortcuts";
 ///
 pub fn shortcuts(frame: &mut Frame, size: Rect, state: &mut State) {
     let mut block = Block::default()
-        .title(BLOCK_TITLE)
         .borders(Borders::ALL)
         .border_style(styling::normal_block_border_style());
 
@@ -27,6 +26,8 @@ pub fn shortcuts(frame: &mut Frame, size: Rect, state: &mut State) {
                 styling::active_block_title_style(),
             ));
         list_item_style = styling::active_list_item_style();
+    } else {
+        block = block.title(BLOCK_TITLE);
     }
 
     // Wait for projects to load before showing starred projects in shortcuts

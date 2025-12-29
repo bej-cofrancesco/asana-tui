@@ -2,115 +2,24 @@ use super::Frame;
 use crate::state::{State, TaskDetailPanel};
 use crate::ui::widgets::styling;
 use chrono::DateTime;
-use regex::Regex;
-use tui::{
+use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Span, Spans, Text},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    text::{Line, Span, Text},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
-
-/// Parse mentions in text - convert profile URLs to @mentions
-fn parse_mentions(text: &str, users: &[crate::asana::User]) -> String {
-    // Pattern: https://app.asana.com/0/profile/{gid}
-    let profile_re = Regex::new(r"https://app\.asana\.com/0/profile/(\d+)").unwrap();
-    
-    profile_re.replace_all(text, |caps: &regex::Captures| {
-        if let Some(gid) = caps.get(1) {
-            // Find user by GID
-            if let Some(user) = users.iter().find(|u| u.gid == gid.as_str()) {
-                format!("@{}", user.name)
-            } else {
-                // Keep original URL if user not found
-                caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string()
-            }
-        } else {
-            caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string()
-        }
-    }).to_string()
-}
-
-/// Parse line text and highlight @mentions
-fn parse_line_with_mentions(line: &str, users: &[crate::asana::User]) -> Spans<'static> {
-    let mut spans = Vec::new();
-    
-    // Pattern to match @mentions - match @ followed by word characters and spaces
-    // We'll manually check for delimiters after matching to avoid look-ahead
-    let mention_re = Regex::new(r"@([\w\s]+)").unwrap();
-    let mut last_end = 0;
-    
-    for cap in mention_re.captures_iter(line) {
-        let full_match = cap.get(0).unwrap();
-        let mention_name = cap.get(1).map(|m| m.as_str().trim()).unwrap_or("");
-        
-        // Check if the mention is followed by a valid delimiter or end of string
-        // Valid delimiters: whitespace, punctuation, or end of line
-        let match_end = full_match.end();
-        let is_valid_mention_end = if match_end >= line.len() {
-            true // End of string is always valid
-        } else {
-            let next_char = line[match_end..].chars().next();
-            // Valid if followed by whitespace, punctuation, or nothing
-            next_char.map(|c| {
-                c.is_whitespace() || matches!(c, '.' | ',' | '!' | '?' | ';' | ':')
-            }).unwrap_or(true)
-        };
-        
-        // Only process if it's a valid mention boundary
-        if is_valid_mention_end {
-            // Add text before mention (clone to own the data)
-            if full_match.start() > last_end {
-                spans.push(Span::styled(
-                    line[last_end..full_match.start()].to_string(),
-                    styling::normal_text_style(),
-                ));
-            }
-            
-            // Check if this mention matches a known user
-            let is_valid_mention = users.iter().any(|u| {
-                u.name.eq_ignore_ascii_case(mention_name)
-            });
-            
-            // Add highlighted mention (clone to own the data)
-            let mention_text = full_match.as_str().to_string();
-            if is_valid_mention {
-                spans.push(Span::styled(
-                    mention_text,
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                // Not a valid mention, render as normal text
-                spans.push(Span::styled(
-                    mention_text,
-                    styling::normal_text_style(),
-                ));
-            }
-            
-            last_end = full_match.end();
-        }
-    }
-    
-    // Add remaining text (clone to own the data)
-    if last_end < line.len() {
-        spans.push(Span::styled(
-            line[last_end..].to_string(),
-            styling::normal_text_style(),
-        ));
-    }
-    
-    if spans.is_empty() {
-        Spans::from(Span::styled(line.to_string(), styling::normal_text_style()))
-    } else {
-        Spans::from(spans)
-    }
-}
+use regex::Regex;
+use std::collections::HashMap;
 
 /// Render task detail view (full screen).
 ///
-pub fn task_detail(frame: &mut Frame, size: Rect, state: &State) {
-    if let Some(task) = state.get_task_detail() {
+pub fn task_detail(frame: &mut Frame, size: Rect, state: &mut State) {
+    // Get task and panel info before borrowing state mutably
+    let task_opt = state.get_task_detail().cloned();
+    let current_panel = state.get_current_task_panel();
+    let is_comment_input = state.is_comment_input_mode();
+
+    if let Some(task) = task_opt {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -119,9 +28,6 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &State) {
             ])
             .split(size);
 
-        // Header with task name and panel indicators
-        let current_panel = state.get_current_task_panel();
-        let is_comment_input = state.is_comment_input_mode();
         let panel_indicators = format!(
             "{} {} {}",
             if current_panel == TaskDetailPanel::Details {
@@ -149,7 +55,7 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &State) {
             ))
             .border_style(styling::active_block_border_style());
 
-        let name_text = Spans::from(vec![Span::styled(
+        let name_text = Line::from(vec![Span::styled(
             &task.name,
             Style::default()
                 .fg(Color::White)
@@ -162,21 +68,21 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &State) {
 
         // Main content area - show only the active panel
         // If comment input mode is active, always show Comments panel
-        let panel_to_show = if state.is_comment_input_mode() {
+        let panel_to_show = if is_comment_input {
             TaskDetailPanel::Comments
         } else {
             current_panel
         };
-        
+
         match panel_to_show {
             TaskDetailPanel::Details => {
-                render_task_properties(frame, chunks[1], task, state);
+                render_task_properties(frame, chunks[1], &task, state);
             }
             TaskDetailPanel::Comments => {
-                render_comments(frame, chunks[1], state, task);
+                render_comments(frame, chunks[1], state, &task);
             }
             TaskDetailPanel::Notes => {
-                render_notes(frame, chunks[1], task, state);
+                render_notes(frame, chunks[1], &task, state);
             }
         }
     } else {
@@ -196,12 +102,12 @@ fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Ta
 
     // Assignee
     if let Some(ref assignee) = task.assignee {
-        lines.push(Spans::from(vec![
+        lines.push(Line::from(vec![
             Span::styled("Assignee: ", Style::default().fg(Color::Yellow)),
             Span::styled(&assignee.name, styling::normal_text_style()),
         ]));
     } else {
-        lines.push(Spans::from(vec![
+        lines.push(Line::from(vec![
             Span::styled("Assignee: ", Style::default().fg(Color::Yellow)),
             Span::styled("Unassigned", Style::default().fg(Color::DarkGray)),
         ]));
@@ -209,7 +115,7 @@ fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Ta
 
     // Due date
     if let Some(ref due_on) = task.due_on {
-        lines.push(Spans::from(vec![
+        lines.push(Line::from(vec![
             Span::styled("Due: ", Style::default().fg(Color::Yellow)),
             Span::styled(due_on, styling::normal_text_style()),
         ]));
@@ -217,7 +123,7 @@ fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Ta
 
     // Section
     if let Some(ref section) = task.section {
-        lines.push(Spans::from(vec![
+        lines.push(Line::from(vec![
             Span::styled("Section: ", Style::default().fg(Color::Yellow)),
             Span::styled(&section.name, styling::normal_text_style()),
         ]));
@@ -226,7 +132,7 @@ fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Ta
     // Tags
     if !task.tags.is_empty() {
         let tag_names: Vec<String> = task.tags.iter().map(|t| t.name.clone()).collect();
-        lines.push(Spans::from(vec![
+        lines.push(Line::from(vec![
             Span::styled("Tags: ", Style::default().fg(Color::Yellow)),
             Span::styled(tag_names.join(", "), styling::normal_text_style()),
         ]));
@@ -238,7 +144,7 @@ fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Ta
     } else {
         "Incomplete"
     };
-    lines.push(Spans::from(vec![
+    lines.push(Line::from(vec![
         Span::styled("Status: ", Style::default().fg(Color::Yellow)),
         Span::styled(
             status_text,
@@ -251,11 +157,11 @@ fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Ta
     ]));
 
     // Subtasks and comments count
-    lines.push(Spans::from(vec![
+    lines.push(Line::from(vec![
         Span::styled("Subtasks: ", Style::default().fg(Color::Yellow)),
         Span::styled(task.num_subtasks.to_string(), styling::normal_text_style()),
     ]));
-    lines.push(Spans::from(vec![
+    lines.push(Line::from(vec![
         Span::styled("Comments: ", Style::default().fg(Color::Yellow)),
         Span::styled(task.num_comments.to_string(), styling::normal_text_style()),
     ]));
@@ -274,23 +180,172 @@ fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Ta
     frame.render_widget(text, size);
 }
 
-fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::asana::Task) {
+/// Create a map of user GID to user name for fast lookups
+fn create_user_map(users: &[crate::asana::User]) -> HashMap<String, String> {
+    users
+        .iter()
+        .map(|u| (u.gid.clone(), u.name.clone()))
+        .collect()
+}
+
+/// Parse line text and highlight @mentions, wrapping text properly
+/// Note: Profile URLs are already replaced with @username when data comes from API
+fn parse_comment_text(
+    line: &str,
+    user_map: &HashMap<String, String>,
+    width: usize,
+) -> Vec<Line<'static>> {
+    // Create a HashSet for O(1) lookup instead of O(n) any() check
+    use std::collections::HashSet;
+    let user_names: HashSet<String> = user_map.values().map(|name| name.to_lowercase()).collect();
+
+    let mut lines = Vec::new();
+    let mut current_line = Vec::new();
+    let mut current_length = 0;
+
+    // Pattern to match @mentions - handle adjacent mentions by matching word boundaries
+    // This will match @username even if followed immediately by another @
+    let mention_re = Regex::new(r"@(\w+)").unwrap();
+    let mut last_end = 0;
+
+    for cap in mention_re.captures_iter(line) {
+        let full_match = cap.get(0).unwrap();
+        let mention_name = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+
+        // Add text before mention
+        if full_match.start() > last_end {
+            let before_text = &line[last_end..full_match.start()];
+            let words: Vec<&str> = before_text.split_whitespace().collect();
+            for word in words {
+                let word_with_space = if current_length > 0 {
+                    format!(" {}", word)
+                } else {
+                    word.to_string()
+                };
+                if current_length + word_with_space.len() > width && !current_line.is_empty() {
+                    lines.push(Line::from(current_line.clone()));
+                    current_line.clear();
+                    current_length = 0;
+                }
+                if current_length > 0 {
+                    current_line.push(Span::styled(" ".to_string(), styling::normal_text_style()));
+                    current_length += 1;
+                }
+                current_line.push(Span::styled(word.to_string(), styling::normal_text_style()));
+                current_length += word.len();
+            }
+        }
+
+        // Check if mention matches a known user - O(1) lookup
+        let is_valid_mention = user_names.contains(&mention_name.to_lowercase());
+        let mention_text = full_match.as_str();
+
+        // Check if mention fits on current line
+        if current_length + mention_text.len() > width && !current_line.is_empty() {
+            lines.push(Line::from(current_line.clone()));
+            current_line.clear();
+            current_length = 0;
+        }
+
+        // Add space before mention if needed (but not if it's at start of line or after another mention)
+        // Only add space if there's actual text before it
+        if current_length > 0 && last_end < full_match.start() {
+            // Check if there's non-whitespace before the mention
+            let text_before = &line[last_end..full_match.start()];
+            if !text_before.trim().is_empty() {
+                current_line.push(Span::styled(" ".to_string(), styling::normal_text_style()));
+                current_length += 1;
+            }
+        }
+
+        if is_valid_mention {
+            current_line.push(Span::styled(
+                mention_text.to_string(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            current_line.push(Span::styled(
+                mention_text.to_string(),
+                styling::normal_text_style(),
+            ));
+        }
+        current_length += mention_text.len();
+
+        last_end = full_match.end();
+    }
+
+    // Add remaining text
+    if last_end < line.len() {
+        let remaining = &line[last_end..];
+        let words: Vec<&str> = remaining.split_whitespace().collect();
+        for word in words {
+            let word_with_space = if current_length > 0 {
+                format!(" {}", word)
+            } else {
+                word.to_string()
+            };
+            if current_length + word_with_space.len() > width && !current_line.is_empty() {
+                lines.push(Line::from(current_line.clone()));
+                current_line.clear();
+                current_length = 0;
+            }
+            if current_length > 0 {
+                current_line.push(Span::styled(" ".to_string(), styling::normal_text_style()));
+                current_length += 1;
+            }
+            current_line.push(Span::styled(word.to_string(), styling::normal_text_style()));
+            current_length += word.len();
+        }
+    }
+
+    if !current_line.is_empty() {
+        lines.push(Line::from(current_line));
+    }
+
+    if lines.is_empty() {
+        vec![Line::from(Span::styled(
+            line.to_string(),
+            styling::normal_text_style(),
+        ))]
+    } else {
+        lines
+    }
+}
+
+fn render_comments(frame: &mut Frame, size: Rect, state: &mut State, _task: &crate::asana::Task) {
     let is_active = state.get_current_task_panel() == TaskDetailPanel::Comments;
-    let stories = state.get_task_stories();
+    // Clone stories to avoid borrow checker issues - limit to reasonable number for performance
+    let stories: Vec<crate::asana::Story> = state.get_task_stories().to_vec();
+    let users = state.get_workspace_users().to_vec();
+    let user_map = create_user_map(&users);
 
     // Filter for actual comments (resource_subtype = "comment_added")
-    // Ignore system activity messages
-    let comments: Vec<&crate::asana::Story> = stories
+    let all_comments: Vec<&crate::asana::Story> = stories
         .iter()
-        .filter(|s| {
-            // Include if it's a comment_added, or if subtype is missing but created_by exists
-            // (for backwards compatibility)
-            match &s.resource_subtype {
-                Some(subtype) => subtype == "comment_added",
-                None => s.created_by.is_some(), // Fallback: if no subtype, assume comment if has author
-            }
+        .filter(|s| match &s.resource_subtype {
+            Some(subtype) => subtype == "comment_added",
+            None => s.created_by.is_some(),
         })
         .collect();
+    
+    // Limit visible comments to prevent lag - only render what's visible + buffer
+    // Use ListState to track which comments are visible
+    let comments_list_state = state.get_comments_list_state();
+    let selected_index = comments_list_state.selected().unwrap_or(0);
+    
+    // Calculate visible range (show ~20 comments max at a time)
+    const MAX_VISIBLE: usize = 20;
+    let start_index = if all_comments.len() <= MAX_VISIBLE {
+        0
+    } else {
+        (selected_index as i32 - MAX_VISIBLE as i32 / 2)
+            .max(0)
+            .min((all_comments.len() - MAX_VISIBLE) as i32) as usize
+    };
+    let end_index = (start_index + MAX_VISIBLE).min(all_comments.len());
+    let comments = &all_comments[start_index..end_index];
 
     // Split into comments area and input area if in comment input mode
     let chunks = if state.is_comment_input_mode() {
@@ -305,9 +360,7 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
             .split(size)
     };
 
-    let title = format!("Comments ({})", comments.len());
-
-    // Highlight border when active OR when in comment input mode
+    let title = format!("Comments ({})", all_comments.len());
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
@@ -323,40 +376,12 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
             .alignment(Alignment::Center);
         frame.render_widget(text, chunks[0]);
     } else {
-        // Calculate available width for text (accounting for borders: 2 chars on each side)
-        let available_width = chunks[0].width.saturating_sub(4).max(10) as usize;
-        
-        // Helper function to wrap text to fit width
-        let wrap_text = |text: &str, width: usize| -> Vec<String> {
-            let mut wrapped = Vec::new();
-            for line in text.lines() {
-                if line.is_empty() {
-                    wrapped.push(String::new());
-                    continue;
-                }
-                let mut remaining = line;
-                while !remaining.is_empty() {
-                    if remaining.len() <= width {
-                        wrapped.push(remaining.to_string());
-                        break;
-                    }
-                    // Find the last space before the width limit
-                    let mut break_point = width;
-                    if let Some(last_space) = remaining[..width].rfind(' ') {
-                        break_point = last_space + 1;
-                    }
-                    wrapped.push(remaining[..break_point].trim_end().to_string());
-                    remaining = remaining[break_point..].trim_start();
-                }
-            }
-            wrapped
-        };
+        // Calculate available width for wrapping (accounting for borders)
+        let available_width = chunks[0].width.saturating_sub(2) as usize;
 
-        // Create all comment lines as Spans (simpler, better performance)
-        // Comments are already in chronological order (oldest first), so newest is at the end
-        let mut all_lines: Vec<Spans> = Vec::new();
-        
-        for story in comments.iter() {
+        // Build list items with wrapped text
+        let mut items: Vec<ListItem> = Vec::new();
+        for story in &comments {
             let author = story
                 .created_by
                 .as_ref()
@@ -369,48 +394,30 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &State, _task: &crate::
                 .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
                 .unwrap_or_else(|| "Unknown time".to_string());
 
-            let header = Spans::from(vec![
-                Span::styled(author, Style::default().fg(Color::Cyan)),
+            // Text is already processed when it came from API (URLs replaced with @username)
+            // Parse and wrap comment text
+            let comment_lines = parse_comment_text(&story.text, &user_map, available_width);
+
+            // Build header line
+            let header_line = Line::from(vec![
+                Span::styled(author, Style::default().fg(Color::Yellow)),
                 Span::styled(" • ", Style::default().fg(Color::DarkGray)),
                 Span::styled(timestamp_str, Style::default().fg(Color::DarkGray)),
             ]);
 
-            // Parse mentions in comment text (profile URLs like https://app.asana.com/0/profile/...)
-            let parsed_text = parse_mentions(&story.text, &state.get_workspace_users());
-            
-            // Wrap comment text to fit available width
-            let wrapped_lines = wrap_text(&parsed_text, available_width);
-            
-            // Create Spans for each wrapped line (with mention highlighting)
-            let text_lines: Vec<Spans> = wrapped_lines
-                .iter()
-                .map(|line| {
-                    parse_line_with_mentions(line, &state.get_workspace_users())
-                })
-                .collect();
+            // Combine header and comment lines
+            let mut all_lines = vec![header_line];
+            all_lines.extend(comment_lines);
 
-            all_lines.push(header);
-            all_lines.push(Spans::from("")); // Add blank line after header
-            all_lines.extend(text_lines);
-            all_lines.push(Spans::from("")); // Add blank line after comment
+            items.push(ListItem::new(all_lines));
         }
 
-        // Use Paragraph instead of List for better performance - show all comments
-        // Scroll to bottom to show newest comments (which are at the end)
-        let total_lines = all_lines.len();
-        let visible_height = chunks[0].height.saturating_sub(2) as usize; // Account for borders
-        let scroll_offset = if total_lines > visible_height {
-            (total_lines - visible_height) as u16
-        } else {
-            0
-        };
-
-        let paragraph = Paragraph::new(Text::from(all_lines))
+        let list = List::new(items)
             .block(block)
-            .wrap(Wrap { trim: true })
-            .scroll((scroll_offset, 0)); // Scroll to bottom (newest)
-        
-        frame.render_widget(paragraph, chunks[0]);
+            .style(styling::normal_text_style())
+            .highlight_style(styling::active_list_item_style());
+
+        frame.render_stateful_widget(list, chunks[0], state.get_comments_list_state());
     }
 
     // Show comment input if in comment input mode

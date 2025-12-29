@@ -1,7 +1,7 @@
 use super::Frame;
 use crate::state::State;
 use crate::ui::widgets::styling;
-use tui::{
+use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::Text,
@@ -9,20 +9,21 @@ use tui::{
 };
 
 pub const BANNER: &str = "
-                                          _           _
-   __ _  ___   __ _  _ __    __ _        | |_  _   _ (_)
-  / _` |/ __| / _` || '_ \\  / _` | _____ | __|| | | || |
- | (_| |\\__ \\| (_| || | | || (_| ||_____|| |_ | |_| || |
-  \\__,_||___/ \\__,_||_| |_| \\__,_|        \\__| \\__,_||_|
+.:                                           
+.: ::                                         
+.:  .::     .::::    .::    .:: .::     .::    
+.::   .::   .::     .::  .::  .::  .:: .::  .:: 
+.:::::: .::    .::: .::   .::  .::  .::.::   .:: 
+.::       .::     .::.::   .::  .::  .::.::   .:: 
+.::         .::.:: .::  .:: .:::.:::  .::  .:: .:::
+                                                                                                     
 ";
 
 pub const CONTENT: &str = "
+  why use asana when you can use the tui?
 
- Raise an Issue: https://github.com/drewnorman/asana-tui/issues 
+  hard core productivity, no bullshit. no fucks given. just get shit done.
 
- View the Source: https://github.com/drewnorman/asana-tui
-
- Make a Contribution: https://github.com/drewnorman/asana-tui/pulls
 
 ";
 
@@ -64,14 +65,12 @@ fn render_logged_in_welcome(frame: &mut Frame, size: Rect, _state: &State) {
         .border_style(styling::active_block_border_style());
     frame.render_widget(block, size);
 
-    let mut banner = Text::from(BANNER);
-    banner.patch_style(styling::banner_style());
-    let banner_widget = Paragraph::new(banner);
+    let banner = Text::from(BANNER);
+    let banner_widget = Paragraph::new(banner.patch_style(styling::banner_style()));
     frame.render_widget(banner_widget, rows[0]);
 
-    let mut content = Text::from(CONTENT);
-    content.patch_style(styling::normal_text_style());
-    let content_widget = Paragraph::new(content);
+    let content = Text::from(CONTENT);
+    let content_widget = Paragraph::new(content.patch_style(styling::normal_text_style()));
     frame.render_widget(content_widget, rows[1]);
 }
 
@@ -97,9 +96,9 @@ fn render_onboarding(frame: &mut Frame, size: Rect, state: &State) {
         .split(size);
 
     // Banner
-    let mut banner = Text::from(BANNER);
-    banner.patch_style(Style::default().fg(Color::Cyan));
-    let banner_widget = Paragraph::new(banner).alignment(Alignment::Center);
+    let banner = Text::from(BANNER);
+    let banner_widget = Paragraph::new(banner.patch_style(Style::default().fg(Color::Cyan)))
+        .alignment(Alignment::Center);
     frame.render_widget(banner_widget, chunks[0]);
 
     // Instructions
@@ -118,7 +117,7 @@ fn render_onboarding(frame: &mut Frame, size: Rect, state: &State) {
         } else {
             Style::default().fg(Color::White)
         })
-        .wrap(tui::widgets::Wrap { trim: true });
+        .wrap(ratatui::widgets::Wrap { trim: true });
     frame.render_widget(instructions, chunks[1]);
 
     // Input field

@@ -1,5 +1,5 @@
 use crate::ui::color::*;
-use tui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 
 /// Return the border style for active blocks.
 ///

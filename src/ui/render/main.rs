@@ -2,7 +2,7 @@ use super::welcome;
 use super::{create_task, edit_task, kanban, task_detail, Frame};
 use crate::state::{Focus, State, View};
 use crate::ui::widgets::styling;
-use tui::{
+use ratatui::{
     layout::Rect,
     text::Span,
     widgets::{Block, Borders},
@@ -27,11 +27,12 @@ pub fn main(frame: &mut Frame, size: Rect, state: &mut State) {
         View::ProjectTasks => {
             // Always show kanban view first (so modal appears on top)
             kanban::kanban(frame, size, state);
-            
+
             // Check if we need to show move task section selection modal (render on top)
             if state.has_move_task() {
                 // Get task name for display before borrowing state mutably
-                let task_name = state.get_kanban_selected_task()
+                let task_name = state
+                    .get_kanban_selected_task()
                     .map(|t| t.name.clone())
                     .unwrap_or_else(|| "task".to_string());
                 render_move_task_modal(frame, size, &task_name, state);
@@ -73,20 +74,23 @@ fn welcome(frame: &mut Frame, size: Rect, state: &mut State) {
 fn my_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
     let block = view_block("My Tasks", state);
     let tasks = state.get_filtered_tasks().to_vec();
-    
+
     // Check if we have a search query and tasks are empty - show "No results" instead of "Loading..."
     let has_search_query = !state.get_search_query().is_empty()
-        && matches!(state.get_search_target(), Some(crate::state::SearchTarget::Tasks));
+        && matches!(
+            state.get_search_target(),
+            Some(crate::state::SearchTarget::Tasks)
+        );
     let has_loaded_tasks = !state.get_tasks().is_empty(); // We have some tasks loaded (even if filtered out)
-    
+
     let list = if tasks.is_empty() && has_search_query && has_loaded_tasks {
         // Empty search results - show "No results found"
-        tui::widgets::List::new(vec![tui::widgets::ListItem::new("No results found")])
+        ratatui::widgets::List::new(vec![ratatui::widgets::ListItem::new("No results found")])
             .block(block)
     } else {
         task_list(&tasks).block(block)
     };
-    
+
     frame.render_stateful_widget(list, size, state.get_tasks_list_state());
 }
 
@@ -113,33 +117,36 @@ fn project_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
     };
     let block = view_block(&title, state);
     let tasks = state.get_filtered_tasks().to_vec();
-    
+
     // Check if we have a search query and tasks are empty - show "No results" instead of "Loading..."
     let has_search_query = !state.get_search_query().is_empty()
-        && matches!(state.get_search_target(), Some(crate::state::SearchTarget::Tasks));
+        && matches!(
+            state.get_search_target(),
+            Some(crate::state::SearchTarget::Tasks)
+        );
     let has_loaded_tasks = !state.get_tasks().is_empty(); // We have some tasks loaded (even if filtered out)
-    
+
     let list = if tasks.is_empty() && has_search_query && has_loaded_tasks {
         // Empty search results - show "No results found"
-        tui::widgets::List::new(vec![tui::widgets::ListItem::new("No results found")])
+        ratatui::widgets::List::new(vec![ratatui::widgets::ListItem::new("No results found")])
             .block(block)
     } else {
         task_list(&tasks).block(block)
     };
-    
+
     frame.render_stateful_widget(list, size, state.get_tasks_list_state());
 }
 
-fn task_list(tasks: &[crate::asana::Task]) -> tui::widgets::List {
+fn task_list(tasks: &[crate::asana::Task]) -> ratatui::widgets::List {
     if tasks.is_empty() {
-        return tui::widgets::List::new(vec![tui::widgets::ListItem::new("Loading...")]);
+        return ratatui::widgets::List::new(vec![ratatui::widgets::ListItem::new("Loading...")]);
     }
-    let items: Vec<tui::widgets::ListItem> = tasks
+    let items: Vec<ratatui::widgets::ListItem> = tasks
         .iter()
-        .map(|t| tui::widgets::ListItem::new(t.name.to_owned()))
+        .map(|t| ratatui::widgets::ListItem::new(t.name.to_owned()))
         .collect();
-    let list = tui::widgets::List::new(items)
-        .block(tui::widgets::Block::default().borders(tui::widgets::Borders::NONE))
+    let list = ratatui::widgets::List::new(items)
+        .block(ratatui::widgets::Block::default().borders(ratatui::widgets::Borders::NONE))
         .style(styling::normal_text_style())
         .highlight_style(styling::active_list_item_style());
     list
@@ -156,18 +163,17 @@ fn view_block<'a>(title: &'a str, state: &mut State) -> Block<'a> {
 }
 
 fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
-    use crate::ui::widgets::styling;
-    use tui::{
+    use ratatui::{
         layout::Alignment,
         style::{Color, Modifier, Style},
-        text::{Span, Spans},
+        text::{Line, Span},
         widgets::{Block, Borders, Clear, Paragraph, Wrap},
     };
 
     // Create a centered popup dialog
     let dialog_width = 60.min(size.width.saturating_sub(4));
     let dialog_height = 7;
-    
+
     // Center horizontally and vertically - use proper centering formula
     let x = if size.width > dialog_width {
         (size.width - dialog_width) / 2
@@ -198,21 +204,21 @@ fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
     };
 
     let text = vec![
-        Spans::from(""),
-        Spans::from(Span::styled(
+        Line::from(""),
+        Line::from(Span::styled(
             format!("Delete task: \"{}\"?", display_name),
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         )),
-        Spans::from(""),
-        Spans::from(Span::styled(
+        Line::from(""),
+        Line::from(Span::styled(
             "This action cannot be undone.",
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )),
-        Spans::from(""),
+        Line::from(""),
     ];
 
     let paragraph = Paragraph::new(text)
@@ -221,15 +227,9 @@ fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
                 .borders(Borders::ALL)
                 .title(Span::styled(
                     "⚠️  Confirm Delete",
-                    Style::default()
-                        .fg(Color::Red)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                 ))
-                .border_style(
-                    Style::default()
-                        .fg(Color::Red)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
         )
         .alignment(Alignment::Center)
         .wrap(Wrap { trim: true });
@@ -240,17 +240,17 @@ fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
 
 fn render_move_task_modal(frame: &mut Frame, size: Rect, task_name: &str, state: &State) {
     use crate::ui::widgets::styling;
-    use tui::{
+    use ratatui::{
         layout::Alignment,
         style::{Color, Modifier, Style},
-        text::{Span, Spans},
+        text::{Line, Span},
         widgets::{Block, Borders, Clear, List, ListItem},
     };
 
     // Create a centered popup dialog
     let dialog_width = 50.min(size.width.saturating_sub(4));
     let dialog_height = 15.min(size.height.saturating_sub(4));
-    
+
     let x = if size.width > dialog_width {
         (size.width - dialog_width) / 2
     } else {
@@ -293,7 +293,7 @@ fn render_move_task_modal(frame: &mut Frame, size: Rect, task_name: &str, state:
             } else {
                 styling::normal_text_style()
             };
-            ListItem::new(Spans::from(Span::styled(&section.name, style)))
+            ListItem::new(Line::from(Span::styled(&section.name, style)))
         })
         .collect();
 
@@ -303,7 +303,7 @@ fn render_move_task_modal(frame: &mut Frame, size: Rect, task_name: &str, state:
         .border_style(styling::active_block_border_style());
 
     // Use ListState for proper selection display
-    let mut list_state = tui::widgets::ListState::default();
+    let mut list_state = ratatui::widgets::ListState::default();
     if !items.is_empty() {
         list_state.select(Some(selected_index.min(items.len().saturating_sub(1))));
     }
