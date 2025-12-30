@@ -1369,6 +1369,12 @@ impl State {
         self.theme_selector_open
     }
 
+    /// Check if in theme selector mode.
+    ///
+    pub fn is_theme_mode(&self) -> bool {
+        self.theme_selector_open
+    }
+
     /// Get theme dropdown index.
     ///
     pub fn get_theme_dropdown_index(&self) -> usize {

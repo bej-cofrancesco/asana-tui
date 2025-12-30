@@ -1081,8 +1081,15 @@ impl Handler {
                                     }
                                 }
                                 Focus::View => {
-                                    debug!("Processing previous task event '{:?}'...", event);
-                                    state.previous_task_index();
+                                    // Only navigate tasks if we're in a view that has tasks
+                                    // (not Welcome view)
+                                    if !matches!(state.current_view(), crate::state::View::Welcome) {
+                                        debug!("Processing previous task event '{:?}'...", event);
+                                        state.previous_task_index();
+                                    } else {
+                                        // In Welcome view with View focus, switch to Menu focus
+                                        state.focus_menu();
+                                    }
                                 }
                             }
                         }
@@ -1192,8 +1199,15 @@ impl Handler {
                                     }
                                 }
                                 Focus::View => {
-                                    debug!("Processing next task event '{:?}'...", event);
-                                    state.next_task_index();
+                                    // Only navigate tasks if we're in a view that has tasks
+                                    // (not Welcome view)
+                                    if !matches!(state.current_view(), crate::state::View::Welcome) {
+                                        debug!("Processing next task event '{:?}'...", event);
+                                        state.next_task_index();
+                                    } else {
+                                        // In Welcome view with View focus, switch to Menu focus
+                                        state.focus_menu();
+                                    }
                                 }
                             }
                         }

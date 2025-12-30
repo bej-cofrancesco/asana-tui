@@ -18,6 +18,8 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
         " Enter: confirm delete, Esc: cancel"
     } else if state.has_move_task() {
         " j/k: navigate sections, Enter: move task, Esc: cancel"
+    } else if state.is_theme_mode() {
+        " j/k: navigate themes, Enter: select theme, Esc: cancel"
     } else if *state.current_focus() == crate::state::Focus::View {
         match state.current_view() {
             crate::state::View::TaskDetail => {
@@ -52,6 +54,18 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                 Style::default()
                     .fg(theme.text.to_color())
                     .bg(theme.footer_search.to_color())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
+        ])
+    } else if state.is_theme_mode() {
+        // Show theme mode indicator with different styling
+        Line::from(vec![
+            Span::styled(
+                "THEME:",
+                Style::default()
+                    .fg(theme.text.to_color())
+                    .bg(theme.footer_edit.to_color()) // Use edit color for theme mode
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
