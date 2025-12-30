@@ -24,7 +24,7 @@ pub const CONTENT: &str = "
 
   hard core productivity, no bullshit. no fucks given. just get shit done.
 
-
+  t to select a theme.
 ";
 
 pub const ONBOARDING_INSTRUCTIONS: &str = r#"
