@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-pub const BANNER: &str = "
+pub const BANNER: &str = r"
          _                  _            _                   _             _                  _      _                   _     
         / /\               / /\         / /\                /\ \     _    / /\               /\ \   /\_\                /\ \   
        / /  \             / /  \       / /  \              /  \ \   /\_\ / /  \              \_\ \ / / /         _      \ \ \  
