@@ -35,21 +35,22 @@ pub fn top_list(frame: &mut Frame, size: Rect, state: &mut State) {
         BLOCK_TITLE.to_string()
     };
 
+    let theme = state.get_theme();
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_style(styling::normal_block_border_style());
+        .border_style(styling::normal_block_border_style(theme));
 
     let list_item_style;
     if *state.current_focus() == Focus::Menu && *state.current_menu() == Menu::TopList {
-        list_item_style = styling::active_list_item_style();
+        list_item_style = styling::active_list_item_style(theme);
         block = block
-            .border_style(styling::active_block_border_style())
+            .border_style(styling::active_block_border_style(theme))
             .title(Span::styled(
                 title_text.clone(),
                 styling::active_block_title_style(),
             ));
     } else {
-        list_item_style = styling::current_list_item_style();
+        list_item_style = styling::current_list_item_style(theme);
         block = block.title(title_text);
     }
 
@@ -79,7 +80,7 @@ pub fn top_list(frame: &mut Frame, size: Rect, state: &mut State) {
                     if state.is_project_starred(&p.gid) {
                         ListItem::new(Line::from(vec![Span::styled(
                             p.name.to_owned(),
-                            styling::normal_text_style().add_modifier(Modifier::ITALIC),
+                            styling::normal_text_style(theme).add_modifier(Modifier::ITALIC),
                         )]))
                     } else {
                         ListItem::new(p.name.to_owned())
@@ -89,7 +90,7 @@ pub fn top_list(frame: &mut Frame, size: Rect, state: &mut State) {
         };
 
     let list = List::new(items)
-        .style(styling::normal_text_style())
+        .style(styling::normal_text_style(theme))
         .highlight_style(list_item_style)
         .block(block);
 

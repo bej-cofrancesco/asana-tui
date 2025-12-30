@@ -571,7 +571,7 @@ impl Handler {
                     ) && !state.is_field_editing_mode() =>
                     {
                         // Navigate to next field
-                        let custom_fields = state.get_project_custom_fields();
+                        let enabled_custom_fields = state.get_enabled_custom_fields();
                         let next_state = match state.get_edit_form_state() {
                             Some(crate::state::EditFormState::Name) => {
                                 crate::state::EditFormState::Notes
@@ -586,14 +586,14 @@ impl Handler {
                                 crate::state::EditFormState::Section
                             }
                             Some(crate::state::EditFormState::Section) => {
-                                if !custom_fields.is_empty() {
+                                if !enabled_custom_fields.is_empty() {
                                     crate::state::EditFormState::CustomField(0)
                                 } else {
                                     crate::state::EditFormState::Name
                                 }
                             }
                             Some(crate::state::EditFormState::CustomField(idx)) => {
-                                if idx + 1 < custom_fields.len() {
+                                if idx + 1 < enabled_custom_fields.len() {
                                     crate::state::EditFormState::CustomField(idx + 1)
                                 } else {
                                     crate::state::EditFormState::Name
@@ -619,12 +619,12 @@ impl Handler {
                     ) && !state.is_field_editing_mode() =>
                     {
                         // Navigate to previous field
-                        let custom_fields = state.get_project_custom_fields();
+                        let enabled_custom_fields = state.get_enabled_custom_fields();
                         let prev_state = match state.get_edit_form_state() {
                             Some(crate::state::EditFormState::Name) => {
-                                if !custom_fields.is_empty() {
+                                if !enabled_custom_fields.is_empty() {
                                     crate::state::EditFormState::CustomField(
-                                        custom_fields.len() - 1,
+                                        enabled_custom_fields.len() - 1,
                                     )
                                 } else {
                                     crate::state::EditFormState::Section
@@ -790,6 +790,9 @@ impl Handler {
                                 event
                             );
                             state.cancel_delete_confirmation();
+                        } else if state.has_theme_selector() {
+                            debug!("Processing cancel theme selector event '{:?}'...", event);
+                            state.close_theme_selector();
                         } else if state.has_move_task() {
                             debug!("Processing cancel move task event '{:?}'...", event);
                             state.clear_move_task();
@@ -971,6 +974,13 @@ impl Handler {
                     } => {
                         if state.is_search_mode() {
                             state.add_search_char('k');
+                        } else if state.has_theme_selector() {
+                            // In theme selector modal, navigate themes FIRST
+                            debug!(
+                                "Processing previous theme in theme selector event '{:?}'...",
+                                event
+                            );
+                            state.previous_theme();
                         } else if state.has_move_task() {
                             // In move task modal, navigate sections FIRST - prevent background task scrolling
                             debug!(
@@ -1084,6 +1094,13 @@ impl Handler {
                     } => {
                         if state.is_search_mode() {
                             state.add_search_char('j');
+                        } else if state.has_theme_selector() {
+                            // In theme selector modal, navigate themes FIRST
+                            debug!(
+                                "Processing next theme in theme selector event '{:?}'...",
+                                event
+                            );
+                            state.next_theme();
                         } else if state.has_move_task() {
                             // In move task modal, navigate sections FIRST - prevent background task scrolling
                             debug!(
@@ -1203,6 +1220,10 @@ impl Handler {
                         } else if state.is_debug_mode() {
                             debug!("Processing exit debug mode (Enter) event '{:?}'...", event);
                             state.exit_debug_mode();
+                        } else if state.has_theme_selector() {
+                            // In theme selector modal, Enter selects the theme
+                            debug!("Processing select theme event '{:?}'...", event);
+                            state.select_theme();
                         } else if state.has_move_task() {
                             // In move task modal, Enter selects the section and moves the task
                             if let Some(task_gid) = state.get_move_task_gid() {
@@ -1808,6 +1829,21 @@ impl Handler {
                                 }
                                 _ => {}
                             }
+                        }
+                    }
+                    KeyEvent {
+                        code: KeyCode::Char('t'),
+                        modifiers: KeyModifiers::NONE,
+                        ..
+                    } => {
+                        if state.is_search_mode() {
+                            state.add_search_char('t');
+                        } else if !state.is_debug_mode() 
+                            && !state.has_theme_selector()
+                            && matches!(state.current_view(), crate::state::View::Welcome) {
+                            // Open theme selector modal (only available on welcome screen)
+                            debug!("Opening theme selector modal...");
+                            state.open_theme_selector();
                         }
                     }
                     KeyEvent {

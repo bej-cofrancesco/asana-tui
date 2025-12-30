@@ -20,23 +20,24 @@ pub fn log(frame: &mut Frame, size: Rect, state: &mut State) {
 
     // If in debug mode, show list with selection
     if state.is_debug_mode() {
+        let theme = state.get_theme();
         let debug_entries = state.get_debug_entries();
         let items: Vec<ListItem> = debug_entries
             .iter()
             .enumerate()
             .map(|(i, entry)| {
                 let style = if i == state.get_debug_index() {
-                    styling::active_list_item_style()
+                    styling::active_list_item_style(theme)
                 } else {
-                    styling::normal_text_style()
+                    styling::normal_text_style(theme)
                 };
                 ListItem::new(Line::from(vec![Span::styled(entry.clone(), style)]))
             })
             .collect();
 
         let list = List::new(items)
-            .style(styling::normal_text_style())
-            .highlight_style(styling::active_list_item_style())
+            .style(styling::normal_text_style(theme))
+            .highlight_style(styling::active_list_item_style(theme))
             .block(block);
 
         // Create a dummy ListState for rendering
@@ -46,19 +47,20 @@ pub fn log(frame: &mut Frame, size: Rect, state: &mut State) {
     } else {
         // Normal mode: show logs from state with auto-scroll to bottom
         // Use stateful widget to control scroll position
+        let theme = state.get_theme();
         let debug_entries = state.get_debug_entries();
         let items: Vec<ListItem> = debug_entries
             .iter()
             .map(|entry| {
                 ListItem::new(Line::from(vec![Span::styled(
                     entry.clone(),
-                    styling::normal_text_style(),
+                    styling::normal_text_style(theme),
                 )]))
             })
             .collect();
 
         let list = List::new(items)
-            .style(styling::normal_text_style())
+            .style(styling::normal_text_style(theme))
             .block(block);
 
         // Use stateful widget to control scroll position

@@ -3,7 +3,7 @@ use crate::state::State;
 use crate::ui::widgets::styling;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::Style,
     text::Text,
     widgets::{Block, Borders, Paragraph},
 };
@@ -59,27 +59,29 @@ fn render_logged_in_welcome(frame: &mut Frame, size: Rect, _state: &State) {
         .margin(2)
         .split(size);
 
+    let theme = _state.get_theme();
     let block = Block::default()
         .borders(Borders::ALL)
         .title("Welcome")
-        .border_style(styling::active_block_border_style());
+        .border_style(styling::active_block_border_style(theme));
     frame.render_widget(block, size);
 
     let banner = Text::from(BANNER);
-    let banner_widget = Paragraph::new(banner.patch_style(styling::banner_style()));
+    let banner_widget = Paragraph::new(banner.patch_style(styling::banner_style(theme)));
     frame.render_widget(banner_widget, rows[0]);
 
     let content = Text::from(CONTENT);
-    let content_widget = Paragraph::new(content.patch_style(styling::normal_text_style()));
+    let content_widget = Paragraph::new(content.patch_style(styling::normal_text_style(theme)));
     frame.render_widget(content_widget, rows[1]);
 }
 
 fn render_onboarding(frame: &mut Frame, size: Rect, state: &State) {
     // Full screen onboarding - no dialog, just full frame
+    let theme = state.get_theme();
     let block = Block::default()
         .borders(Borders::ALL)
         .title("Welcome to Asana TUI - Setup")
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(theme.info.to_color()));
 
     frame.render_widget(block, size);
 
@@ -97,8 +99,9 @@ fn render_onboarding(frame: &mut Frame, size: Rect, state: &State) {
 
     // Banner
     let banner = Text::from(BANNER);
-    let banner_widget = Paragraph::new(banner.patch_style(Style::default().fg(Color::Cyan)))
-        .alignment(Alignment::Center);
+    let banner_widget =
+        Paragraph::new(banner.patch_style(Style::default().fg(theme.info.to_color())))
+            .alignment(Alignment::Center);
     frame.render_widget(banner_widget, chunks[0]);
 
     // Instructions
@@ -113,9 +116,9 @@ fn render_onboarding(frame: &mut Frame, size: Rect, state: &State) {
 
     let instructions = Paragraph::new(instructions_text)
         .style(if state.get_auth_error().is_some() {
-            Style::default().fg(Color::White)
+            Style::default().fg(theme.error.to_color())
         } else {
-            Style::default().fg(Color::White)
+            Style::default().fg(theme.text.to_color())
         })
         .wrap(ratatui::widgets::Wrap { trim: true });
     frame.render_widget(instructions, chunks[1]);
@@ -136,18 +139,18 @@ fn render_onboarding(frame: &mut Frame, size: Rect, state: &State) {
             "Access Token (Enter to submit)"
         })
         .border_style(if state.get_auth_error().is_some() {
-            Style::default().fg(Color::Red)
+            Style::default().fg(theme.error.to_color())
         } else {
-            Style::default().fg(Color::Yellow)
+            Style::default().fg(theme.warning.to_color())
         });
 
     let input_para =
         Paragraph::new(input_text)
             .block(input_block)
             .style(if token_input.is_empty() {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(theme.text_muted.to_color())
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(theme.text.to_color())
             });
 
     frame.render_widget(input_para, chunks[2]);

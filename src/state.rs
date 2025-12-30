@@ -133,6 +133,8 @@ pub struct State {
     task_filter: TaskFilter,
     delete_confirmation: Option<String>, // GID of task pending deletion confirmation
     move_task_gid: Option<String>,       // GID of task being moved (for section selection modal)
+    theme_selector_open: bool,            // Whether theme selector modal is open
+    theme_dropdown_index: usize,          // Selected index in theme selector
     current_task_detail: Option<Task>,   // Currently viewed task with full details
     sections: Vec<Section>,              // Project sections for kanban
     workspace_users: Vec<User>,          // Users for assignment dropdowns
@@ -179,6 +181,7 @@ pub struct State {
     access_token_input: String, // Input field for welcome screen
     has_access_token: bool,    // Whether access token exists (user is logged in)
     auth_error: Option<String>, // Error message if authentication fails
+    theme: crate::ui::Theme,    // Current theme
 }
 
 /// Specifies which panel is being searched.
@@ -235,6 +238,8 @@ impl Default for State {
             task_filter: TaskFilter::All,
             delete_confirmation: None,
             move_task_gid: None,
+            theme_selector_open: false,
+            theme_dropdown_index: 0,
             current_task_detail: None,
             sections: vec![],
             workspace_users: vec![],
@@ -274,6 +279,7 @@ impl Default for State {
             access_token_input: String::new(),
             has_access_token: false, // Default to false, will be set when token is loaded
             auth_error: None,        // No error initially
+            theme: crate::ui::Theme::default(),
         }
     }
 }
@@ -285,6 +291,7 @@ impl State {
         starred_projects: Vec<String>,
         starred_project_names: HashMap<String, String>,
         has_access_token: bool,
+        theme: crate::ui::Theme,
     ) -> Self {
         State {
             net_sender: Some(net_sender),
@@ -293,8 +300,15 @@ impl State {
             starred_project_names,
             debug_entries: vec![], // Initialize empty, will be populated by logger
             has_access_token,
+            theme,
             ..State::default()
         }
+    }
+    
+    /// Get the current theme.
+    ///
+    pub fn get_theme(&self) -> &crate::ui::Theme {
+        &self.theme
     }
 
     /// Returns details for current user.
@@ -602,6 +616,10 @@ impl State {
     /// Push a view onto the view stack.
     ///
     pub fn push_view(&mut self, view: View) -> &mut Self {
+        // Close theme selector if pushing a non-Welcome view
+        if !matches!(view, View::Welcome) {
+            self.close_theme_selector();
+        }
         self.view_stack.push(view);
         self
     }
@@ -1324,6 +1342,87 @@ impl State {
         self
     }
 
+    /// Open theme selector modal.
+    ///
+    pub fn open_theme_selector(&mut self) -> &mut Self {
+        self.theme_selector_open = true;
+        // Initialize dropdown index to current theme
+        let available_themes = crate::ui::Theme::available_themes();
+        if let Some(current_index) = available_themes.iter().position(|name| name == &self.theme.name) {
+            self.theme_dropdown_index = current_index;
+        } else {
+            self.theme_dropdown_index = 0;
+        }
+        self
+    }
+
+    /// Close theme selector modal.
+    ///
+    pub fn close_theme_selector(&mut self) -> &mut Self {
+        self.theme_selector_open = false;
+        self
+    }
+
+    /// Check if theme selector modal is open.
+    ///
+    pub fn has_theme_selector(&self) -> bool {
+        self.theme_selector_open
+    }
+
+    /// Get theme dropdown index.
+    ///
+    pub fn get_theme_dropdown_index(&self) -> usize {
+        self.theme_dropdown_index
+    }
+
+    /// Set theme dropdown index.
+    ///
+    #[allow(dead_code)]
+    pub fn set_theme_dropdown_index(&mut self, index: usize) -> &mut Self {
+        self.theme_dropdown_index = index;
+        self
+    }
+
+    /// Navigate to next theme in selector.
+    ///
+    pub fn next_theme(&mut self) -> &mut Self {
+        let available_themes = crate::ui::Theme::available_themes();
+        if !available_themes.is_empty() {
+            self.theme_dropdown_index = (self.theme_dropdown_index + 1) % available_themes.len();
+        }
+        self
+    }
+
+    /// Navigate to previous theme in selector.
+    ///
+    pub fn previous_theme(&mut self) -> &mut Self {
+        let available_themes = crate::ui::Theme::available_themes();
+        if !available_themes.is_empty() {
+            if self.theme_dropdown_index == 0 {
+                self.theme_dropdown_index = available_themes.len() - 1;
+            } else {
+                self.theme_dropdown_index -= 1;
+            }
+        }
+        self
+    }
+
+    /// Select current theme and apply it.
+    ///
+    pub fn select_theme(&mut self) -> &mut Self {
+        let available_themes = crate::ui::Theme::available_themes();
+        if let Some(theme_name) = available_themes.get(self.theme_dropdown_index) {
+            if let Some(new_theme) = crate::ui::Theme::from_name(theme_name) {
+                self.theme = new_theme;
+                // Trigger config save
+                if let Some(sender) = &self.config_save_sender {
+                    let _ = sender.send(());
+                }
+            }
+        }
+        self.close_theme_selector()
+    }
+
     /// Set kanban task index.
     ///
     #[allow(dead_code)]
@@ -1917,6 +2016,25 @@ impl State {
     ///
     pub fn get_project_custom_fields(&self) -> &[CustomField] {
         &self.project_custom_fields
+    }
+
+    /// Get enabled custom fields (excluding custom_id and disabled fields).
+    ///
+    pub fn get_enabled_custom_fields(&self) -> Vec<&CustomField> {
+        self.project_custom_fields
+            .iter()
+            .filter(|cf| {
+                // Skip custom_id fields
+                let is_custom_id = cf
+                    .representation_type
+                    .as_ref()
+                    .map(|s| s == "custom_id")
+                    .unwrap_or(false)
+                    || cf.id_prefix.is_some();
+                // Only include enabled fields
+                !is_custom_id && cf.enabled
+            })
+            .collect()
     }
 
     /// Set project custom fields.

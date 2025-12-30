@@ -4,7 +4,7 @@ use crate::state::State;
 use crate::ui::widgets::styling;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
@@ -17,6 +17,7 @@ fn render_dropdown_generic(
     items: Vec<ListItem>,
     selected_index: usize,
     dropdown_title: &str,
+    state: &State,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -27,13 +28,14 @@ fn render_dropdown_generic(
         .split(area);
 
     // Search input
+    let theme = state.get_theme();
     let search_block = Block::default()
         .borders(Borders::ALL)
         .title(search_title)
-        .border_style(styling::active_block_border_style());
+        .border_style(styling::active_block_border_style(theme));
     let search_para = Paragraph::new(format!("> {}", search_text))
         .block(search_block)
-        .style(styling::normal_text_style());
+        .style(styling::normal_text_style(theme));
     frame.render_widget(search_para, chunks[0]);
 
     // Calculate visible range (show max 5 items, centered around selected)
@@ -53,7 +55,7 @@ fn render_dropdown_generic(
     let block = Block::default()
         .borders(Borders::ALL)
         .title(dropdown_title)
-        .border_style(styling::active_block_border_style());
+        .border_style(styling::active_block_border_style(theme));
 
     // Use ListState for proper selection display
     let mut list_state = ratatui::widgets::ListState::default();
@@ -65,11 +67,11 @@ fn render_dropdown_generic(
 
     let list = List::new(visible_items.iter().cloned())
         .block(block)
-        .style(styling::normal_text_style())
+        .style(styling::normal_text_style(theme))
         .highlight_style(
             Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
+                .fg(theme.highlight_fg.to_color())
+                .bg(theme.highlight_bg.to_color())
                 .add_modifier(Modifier::BOLD),
         );
 
@@ -120,6 +122,7 @@ pub fn render_assignee_dropdown(frame: &mut Frame, area: Rect, state: &State) {
             "Assignee ({} results, ↑ / ↓ arrow to navigate, Enter to select)",
             filtered.len()
         ),
+        state,
     );
 }
 
@@ -156,6 +159,7 @@ pub fn render_section_dropdown(frame: &mut Frame, area: Rect, state: &State) {
             "Section ({} results, ↑ / ↓ arrow to navigate, Enter to select)",
             filtered.len()
         ),
+        state,
     );
 }
 
@@ -197,5 +201,6 @@ pub fn render_enum_dropdown(
             cf.name,
             filtered.len()
         ),
+        state,
     );
 }

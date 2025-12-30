@@ -13,19 +13,20 @@ const BLOCK_TITLE: &str = "Shortcuts";
 /// Render shortcuts widget according to state.
 ///
 pub fn shortcuts(frame: &mut Frame, size: Rect, state: &mut State) {
+    let theme = state.get_theme().clone();
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_style(styling::normal_block_border_style());
+        .border_style(styling::normal_block_border_style(&theme));
 
-    let mut list_item_style = styling::current_list_item_style();
+    let mut list_item_style = styling::current_list_item_style(&theme);
     if *state.current_focus() == Focus::Menu && *state.current_menu() == Menu::Shortcuts {
         block = block
-            .border_style(styling::active_block_border_style())
+            .border_style(styling::active_block_border_style(&theme))
             .title(Span::styled(
                 BLOCK_TITLE,
                 styling::active_block_title_style(),
             ));
-        list_item_style = styling::active_list_item_style();
+        list_item_style = styling::active_list_item_style(&theme);
     } else {
         block = block.title(BLOCK_TITLE);
     }
@@ -52,7 +53,7 @@ pub fn shortcuts(frame: &mut Frame, size: Rect, state: &mut State) {
         .collect();
 
     let list = List::new(items)
-        .style(styling::normal_text_style())
+        .style(styling::normal_text_style(&theme))
         .highlight_style(list_item_style)
         .block(block);
     

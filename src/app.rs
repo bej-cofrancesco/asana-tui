@@ -44,6 +44,10 @@ impl App {
         let starred_project_names = config.starred_project_names.clone();
         let has_access_token = config.access_token.is_some();
         let access_token = config.access_token.clone();
+        
+        // Load theme from config
+        let theme = crate::ui::Theme::from_name(&config.theme_name)
+            .unwrap_or_else(|| crate::ui::Theme::default());
 
         let state = Arc::new(Mutex::new(State::new(
             tx.clone(),
@@ -51,6 +55,7 @@ impl App {
             starred_projects,
             starred_project_names,
             has_access_token,
+            theme,
         )));
 
         // Set up log capture to state BEFORE initializing tui_logger
@@ -125,6 +130,7 @@ impl App {
             let state = app.state.lock().await;
             app.config.starred_projects = state.get_starred_project_gids();
             app.config.starred_project_names = state.get_starred_project_names();
+            app.config.theme_name = state.get_theme().name.clone();
             if let Err(e) = app.config.save() {
                 error!("Failed to save config on exit: {}", e);
             }
@@ -144,6 +150,7 @@ impl App {
                 if let Ok(state_guard) = state.try_lock() {
                     config.starred_projects = state_guard.get_starred_project_gids();
                     config.starred_project_names = state_guard.get_starred_project_names();
+                    config.theme_name = state_guard.get_theme().name.clone();
                     if let Err(e) = config.save() {
                         error!("Failed to save config: {}", e);
                     }

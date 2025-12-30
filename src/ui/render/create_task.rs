@@ -5,7 +5,7 @@ use crate::state::{CustomFieldValue, EditFormState, State};
 use crate::ui::widgets::styling;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
@@ -32,7 +32,7 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &mut State) {
 
     let form_state = state.get_edit_form_state().unwrap_or(EditFormState::Name);
     // Clone custom fields early to avoid borrow checker issues
-    // Filter out custom_id fields (they cannot be manually edited)
+    // Filter out custom_id fields and disabled fields (they cannot be manually edited)
     let custom_fields: Vec<CustomField> = state
         .get_project_custom_fields()
         .iter()
@@ -44,7 +44,9 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &mut State) {
                 .map(|s| s == "custom_id")
                 .unwrap_or(false)
                 || cf.id_prefix.is_some();
-            !is_custom_id
+            // Skip disabled fields
+            let is_enabled = cf.enabled;
+            !is_custom_id && is_enabled
         })
         .cloned()
         .collect();
@@ -195,6 +197,7 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &mut State) {
                     state.get_form_name(),
                     form_state == EditFormState::Name,
                     is_editing && form_state == EditFormState::Name,
+                    state,
                 );
             }
             "Notes" => {
@@ -235,6 +238,7 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &mut State) {
                         &assignee_text,
                         form_state == EditFormState::Assignee,
                         false,
+                        state,
                     );
                 }
             }
@@ -246,6 +250,7 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &mut State) {
                     state.get_form_due_on(),
                     form_state == EditFormState::DueDate,
                     is_editing && form_state == EditFormState::DueDate,
+                    state,
                 );
             }
             "Section" => {
@@ -271,6 +276,7 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &mut State) {
                         section_text,
                         form_state == EditFormState::Section,
                         false,
+                        state,
                     );
                 }
             }
@@ -306,25 +312,27 @@ fn render_field(
     value: &str,
     is_selected: bool,
     is_editing: bool,
+    state: &State,
 ) {
+    let theme = state.get_theme();
     // Different styles for navigation vs editing
     let (border_style, title) = if is_editing {
         // EDITING: Yellow border and indicator
         (
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme.warning.to_color())
                 .add_modifier(Modifier::BOLD),
             format!("{} [EDITING]", label),
         )
     } else if is_selected {
         // SELECTED (Navigation mode): Cyan border
         (
-            styling::active_block_border_style(), // Cyan
+            styling::active_block_border_style(theme),
             format!("{} [Press Enter to edit]", label),
         )
     } else {
         // Not selected: Normal border
-        (styling::normal_block_border_style(), label.to_string())
+        (styling::normal_block_border_style(theme), label.to_string())
     };
 
     let block = Block::default()
@@ -344,24 +352,24 @@ fn render_field(
 
     let text_style = if is_editing {
         Style::default()
-            .fg(Color::Yellow)
+            .fg(theme.warning.to_color())
             .add_modifier(Modifier::BOLD)
     } else if is_selected {
         Style::default()
-            .fg(Color::Cyan)
+            .fg(theme.info.to_color())
             .add_modifier(Modifier::BOLD)
     } else {
-        styling::normal_text_style()
+        styling::normal_text_style(theme)
     };
 
     let text = if is_editing {
         Line::from(vec![
             Span::styled(display_value, text_style),
-            Span::styled(" █", Style::default().fg(Color::Yellow)), // Editing cursor
+            Span::styled(" █", Style::default().fg(theme.warning.to_color())), // Editing cursor
         ])
     } else if is_selected {
         Line::from(vec![
-            Span::styled("▸ ", Style::default().fg(Color::Cyan)), // Navigation indicator
+            Span::styled("▸ ", Style::default().fg(theme.info.to_color())), // Navigation indicator
             Span::styled(display_value, text_style),
         ])
     } else {
@@ -379,23 +387,24 @@ fn render_notes_field(
     is_selected: bool,
     is_editing: bool,
 ) {
+    let theme = state.get_theme();
     let (border_style, title) = if is_editing {
         // EDITING: Yellow border and indicator
         (
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme.warning.to_color())
                 .add_modifier(Modifier::BOLD),
             "Notes [EDITING - Esc to exit]",
         )
     } else if is_selected {
         // SELECTED (Navigation mode): Cyan border
         (
-            styling::active_block_border_style(), // Cyan
+            styling::active_block_border_style(theme),
             "Notes [Press Enter to edit]",
         )
     } else {
         // Not selected: Normal border
-        (styling::normal_block_border_style(), "Notes")
+        (styling::normal_block_border_style(theme), "Notes")
     };
 
     let block = Block::default()
@@ -428,7 +437,7 @@ fn render_custom_field_inner(
                 Some(CustomFieldValue::Text(s)) => s.clone(),
                 _ => String::new(),
             };
-            render_field(frame, size, &cf.name, &text_value, is_selected, is_editing);
+            render_field(frame, size, &cf.name, &text_value, is_selected, is_editing, state);
         }
         "number" => {
             let num_value = match &value {
@@ -443,6 +452,7 @@ fn render_custom_field_inner(
                 &num_value,
                 is_selected,
                 is_editing,
+                state,
             );
         }
         "date" => {
@@ -458,6 +468,7 @@ fn render_custom_field_inner(
                 &date_value,
                 is_selected,
                 is_editing,
+                state,
             );
         }
         "enum" => {
@@ -481,6 +492,7 @@ fn render_custom_field_inner(
                     &selected_text,
                     is_selected,
                     false,
+                    state,
                 );
             }
         }
@@ -509,6 +521,7 @@ fn render_custom_field_inner(
                     },
                     is_selected,
                     false,
+                    state,
                 );
             }
         }
@@ -533,6 +546,7 @@ fn render_custom_field_inner(
                     &selected_text,
                     is_selected,
                     false,
+                    state,
                 );
             }
         }
@@ -544,6 +558,7 @@ fn render_custom_field_inner(
                 "Unsupported type",
                 is_selected,
                 false,
+                state,
             );
         }
     }
@@ -595,6 +610,7 @@ fn render_multi_enum_dropdown(
         &search_text,
         true,
         true,
+        state,
     );
 
     // Dropdown list with checkboxes
@@ -605,9 +621,9 @@ fn render_multi_enum_dropdown(
             let is_selected = selected_gids.contains(&eo.gid);
             let prefix = if is_selected { "[✓] " } else { "[ ] " };
             let style = if i == selected_idx {
-                styling::active_list_item_style()
+                styling::active_list_item_style(state.get_theme())
             } else {
-                styling::normal_text_style()
+                styling::normal_text_style(state.get_theme())
             };
             ListItem::new(format!("{}{}", prefix, eo.name)).style(style)
         })
@@ -619,8 +635,8 @@ fn render_multi_enum_dropdown(
             filtered.len(),
             selected_gids.len()
         )))
-        .style(styling::normal_text_style())
-        .highlight_style(styling::active_list_item_style());
+        .style(styling::normal_text_style(state.get_theme()))
+        .highlight_style(styling::active_list_item_style(state.get_theme()));
 
     frame.render_widget(list, chunks[1]);
 }
@@ -645,10 +661,11 @@ fn render_people_dropdown(
     let search_block = Block::default()
         .borders(Borders::ALL)
         .title(format!("Search {} (people)", cf.name))
-        .border_style(styling::active_block_border_style());
+        .border_style(styling::active_block_border_style(state.get_theme()));
+    let theme = state.get_theme();
     let search_para = Paragraph::new(format!("> {}", search_text))
         .block(search_block)
-        .style(styling::normal_text_style());
+        .style(styling::normal_text_style(theme));
     frame.render_widget(search_para, chunks[0]);
 
     // Filtered users list - limit to max 5 visible items
@@ -703,21 +720,22 @@ fn render_people_dropdown(
             filtered.len(),
             selected_gids.len()
         ))
-        .border_style(styling::active_block_border_style());
+        .border_style(styling::active_block_border_style(state.get_theme()));
 
     // Use ListState for proper selection display
     let mut list_state = ratatui::widgets::ListState::default();
     if !items.is_empty() {
         list_state.select(Some(visible_selected.min(items.len().saturating_sub(1))));
     }
-
+    
+    let theme = state.get_theme();
     let list = List::new(items)
         .block(block)
-        .style(styling::normal_text_style())
+        .style(styling::normal_text_style(theme))
         .highlight_style(
             Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
+                .fg(theme.highlight_fg.to_color())
+                .bg(theme.highlight_bg.to_color())
                 .add_modifier(Modifier::BOLD),
         );
 

@@ -16,6 +16,7 @@ pub struct Config {
     pub access_token: Option<String>,
     pub starred_projects: Vec<String>, // GIDs
     pub starred_project_names: std::collections::HashMap<String, String>, // GID -> Name
+    pub theme_name: String,
     file_path: Option<PathBuf>,
 }
 
@@ -28,6 +29,12 @@ struct FileSpec {
     pub starred_projects: Vec<String>, // GIDs
     #[serde(default)]
     pub starred_project_names: std::collections::HashMap<String, String>, // GID -> Name
+    #[serde(default = "default_theme_name")]
+    pub theme_name: String,
+}
+
+fn default_theme_name() -> String {
+    "tokyo-night".to_string()
 }
 
 impl Config {
@@ -39,6 +46,7 @@ impl Config {
             access_token: None,
             starred_projects: vec![],
             starred_project_names: std::collections::HashMap::new(),
+            theme_name: default_theme_name(),
         }
     }
 
@@ -70,6 +78,7 @@ impl Config {
             self.access_token = Some(data.access_token);
             self.starred_projects = data.starred_projects;
             self.starred_project_names = data.starred_project_names;
+            self.theme_name = data.theme_name;
         }
         // Otherwise, leave access_token as None - will be handled in TUI onboarding
         // Don't prompt via stdin, let the TUI handle it
@@ -91,6 +100,7 @@ impl Config {
             access_token: access_token.clone(),
             starred_projects: self.starred_projects.clone(),
             starred_project_names: self.starred_project_names.clone(),
+            theme_name: self.theme_name.clone(),
         };
         let content = serde_yaml::to_string(&data)?;
 
@@ -120,6 +130,7 @@ impl Config {
                 .ok_or(anyhow!("No access token"))?,
             starred_projects: self.starred_projects.clone(),
             starred_project_names: self.starred_project_names.clone(),
+            theme_name: self.theme_name.clone(),
         };
         let content = serde_yaml::to_string(&data)?;
         let file_path = self.file_path.as_ref().unwrap();

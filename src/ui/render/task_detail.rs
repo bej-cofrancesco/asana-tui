@@ -4,7 +4,7 @@ use crate::ui::widgets::styling;
 use chrono::DateTime;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
 };
@@ -45,18 +45,19 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &mut State) {
             },
         );
 
+        let theme = state.get_theme();
         let header = Block::default()
             .borders(Borders::ALL)
             .title(format!(
                 "Task Details - h/l: switch panel | {}",
                 panel_indicators
             ))
-            .border_style(styling::active_block_border_style());
+            .border_style(styling::active_block_border_style(theme));
 
         let name_text = Line::from(vec![Span::styled(
             &task.name,
             Style::default()
-                .fg(Color::White)
+                .fg(theme.text.to_color())
                 .add_modifier(Modifier::BOLD),
         )]);
         let name_para = Paragraph::new(name_text)
@@ -92,6 +93,7 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &mut State) {
 }
 
 fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Task, state: &State) {
+    let theme = state.get_theme();
     let is_active = state.get_current_task_panel() == TaskDetailPanel::Details;
 
     let mut lines = vec![];
@@ -99,29 +101,29 @@ fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Ta
     // Assignee
     if let Some(ref assignee) = task.assignee {
         lines.push(Line::from(vec![
-            Span::styled("Assignee: ", Style::default().fg(Color::Yellow)),
-            Span::styled(&assignee.name, styling::normal_text_style()),
+            Span::styled("Assignee: ", Style::default().fg(theme.warning.to_color())),
+            Span::styled(&assignee.name, styling::normal_text_style(theme)),
         ]));
     } else {
         lines.push(Line::from(vec![
-            Span::styled("Assignee: ", Style::default().fg(Color::Yellow)),
-            Span::styled("Unassigned", Style::default().fg(Color::DarkGray)),
+            Span::styled("Assignee: ", Style::default().fg(theme.warning.to_color())),
+            Span::styled("Unassigned", Style::default().fg(theme.text_muted.to_color())),
         ]));
     }
 
     // Due date
     if let Some(ref due_on) = task.due_on {
         lines.push(Line::from(vec![
-            Span::styled("Due: ", Style::default().fg(Color::Yellow)),
-            Span::styled(due_on, styling::normal_text_style()),
+            Span::styled("Due: ", Style::default().fg(theme.warning.to_color())),
+            Span::styled(due_on, styling::normal_text_style(theme)),
         ]));
     }
 
     // Section
     if let Some(ref section) = task.section {
         lines.push(Line::from(vec![
-            Span::styled("Section: ", Style::default().fg(Color::Yellow)),
-            Span::styled(&section.name, styling::normal_text_style()),
+            Span::styled("Section: ", Style::default().fg(theme.warning.to_color())),
+            Span::styled(&section.name, styling::normal_text_style(theme)),
         ]));
     }
 
@@ -129,8 +131,8 @@ fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Ta
     if !task.tags.is_empty() {
         let tag_names: Vec<String> = task.tags.iter().map(|t| t.name.clone()).collect();
         lines.push(Line::from(vec![
-            Span::styled("Tags: ", Style::default().fg(Color::Yellow)),
-            Span::styled(tag_names.join(", "), styling::normal_text_style()),
+            Span::styled("Tags: ", Style::default().fg(theme.warning.to_color())),
+            Span::styled(tag_names.join(", "), styling::normal_text_style(theme)),
         ]));
     }
 
@@ -141,34 +143,34 @@ fn render_task_properties(frame: &mut Frame, size: Rect, task: &crate::asana::Ta
         "Incomplete"
     };
     lines.push(Line::from(vec![
-        Span::styled("Status: ", Style::default().fg(Color::Yellow)),
+        Span::styled("Status: ", Style::default().fg(theme.warning.to_color())),
         Span::styled(
             status_text,
             if task.completed {
-                Style::default().fg(Color::Green)
+                Style::default().fg(theme.success.to_color())
             } else {
-                Style::default().fg(Color::Red)
+                Style::default().fg(theme.error.to_color())
             },
         ),
     ]));
 
     // Subtasks and comments count
     lines.push(Line::from(vec![
-        Span::styled("Subtasks: ", Style::default().fg(Color::Yellow)),
-        Span::styled(task.num_subtasks.to_string(), styling::normal_text_style()),
+        Span::styled("Subtasks: ", Style::default().fg(theme.warning.to_color())),
+        Span::styled(task.num_subtasks.to_string(), styling::normal_text_style(theme)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("Comments: ", Style::default().fg(Color::Yellow)),
-        Span::styled(task.num_comments.to_string(), styling::normal_text_style()),
+        Span::styled("Comments: ", Style::default().fg(theme.warning.to_color())),
+        Span::styled(task.num_comments.to_string(), styling::normal_text_style(theme)),
     ]));
 
     let block = Block::default()
         .borders(Borders::ALL)
         .title("Properties")
         .border_style(if is_active {
-            styling::active_block_border_style()
-        } else {
-            styling::normal_block_border_style()
+            styling::active_block_border_style(theme)
+            } else {
+            styling::normal_block_border_style(theme)
         });
     let text = Paragraph::new(Text::from(lines))
         .block(block)
@@ -204,14 +206,15 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &mut State, _task: &cra
             .split(size)
     };
 
+    let theme = state.get_theme();
     let title = format!("Comments ({})", comments.len());
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
         .border_style(if is_active || is_comment_input {
-            styling::active_block_border_style()
-        } else {
-            styling::normal_block_border_style()
+            styling::active_block_border_style(theme)
+            } else {
+            styling::normal_block_border_style(theme)
         });
 
     if comments.is_empty() && !is_comment_input {
@@ -242,15 +245,15 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &mut State, _task: &cra
                         Span::styled(
                             author,
                             Style::default()
-                                .fg(Color::Yellow)
+                                .fg(theme.warning.to_color())
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Span::styled(" • ", Style::default().fg(Color::DarkGray)),
-                        Span::styled(timestamp_str, Style::default().fg(Color::DarkGray)),
+                        Span::styled(" • ", Style::default().fg(theme.text_muted.to_color())),
+                        Span::styled(timestamp_str, Style::default().fg(theme.text_muted.to_color())),
                     ]),
                     Line::from(vec![Span::styled(
                         &story.text,
-                        Style::default().fg(Color::White),
+                        Style::default().fg(theme.text.to_color()),
                     )]),
                 ]
             })
@@ -259,10 +262,10 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &mut State, _task: &cra
 
         let list = List::new(items)
             .block(block)
-            .style(styling::normal_text_style())
+            .style(styling::normal_text_style(theme))
             .highlight_style(
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme.info.to_color())
                     .add_modifier(Modifier::BOLD),
             );
 
@@ -277,27 +280,28 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &mut State, _task: &cra
         let input_text = format!("> {}", state.get_comment_input_text());
         let input_para = Paragraph::new(input_text)
             .block(input_block)
-            .style(styling::normal_text_style());
+            .style(styling::normal_text_style(theme));
         frame.render_widget(input_para, chunks[1]);
     }
 }
 
 fn render_notes(frame: &mut Frame, size: Rect, task: &crate::asana::Task, state: &State) {
+    let theme = state.get_theme();
     let is_active = state.get_current_task_panel() == TaskDetailPanel::Notes;
 
     let block = Block::default()
         .borders(Borders::ALL)
         .title("Notes")
         .border_style(if is_active {
-            styling::active_block_border_style()
-        } else {
-            styling::normal_block_border_style()
+            styling::active_block_border_style(theme)
+            } else {
+            styling::normal_block_border_style(theme)
         });
 
     let notes_text = task.notes.as_deref().unwrap_or("No notes");
     let text = Paragraph::new(notes_text)
         .block(block)
         .wrap(Wrap { trim: true })
-        .style(styling::normal_text_style());
+        .style(styling::normal_text_style(theme));
     frame.render_widget(text, size);
 }

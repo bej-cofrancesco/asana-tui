@@ -1,9 +1,8 @@
 use super::Frame;
 use crate::state::State;
-use crate::ui::color::*;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
 };
@@ -44,17 +43,18 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
         " j k h l: navigate, s: add/remove shortcut, /: search, d: debug mode, enter: select, esc: cancel, q: quit"
     };
 
+    let theme = state.get_theme();
     let controls_content = if state.is_search_mode() {
         // Show search mode indicator with different styling
         Line::from(vec![
             Span::styled(
                 "SEARCH:",
                 Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Blue)
+                    .fg(theme.text.to_color())
+                    .bg(theme.footer_search.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(YELLOW)),
+            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
         ])
     } else if state.is_debug_mode() {
         // Show debug mode indicator with different styling
@@ -62,33 +62,33 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
             Span::styled(
                 "DEBUG:",
                 Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Green)
+                    .fg(theme.text.to_color())
+                    .bg(theme.footer_debug.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(YELLOW)),
+            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
         ])
     } else if state.has_delete_confirmation() {
         Line::from(vec![
             Span::styled(
                 "DELETE:",
                 Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Red)
+                    .fg(theme.text.to_color())
+                    .bg(theme.footer_delete.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(YELLOW)),
+            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
         ])
     } else if state.has_move_task() {
         Line::from(vec![
             Span::styled(
                 "MOVE:",
                 Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Magenta)
+                    .fg(theme.text.to_color())
+                    .bg(theme.footer_move.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(YELLOW)),
+            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
         ])
     } else if matches!(
         state.current_view(),
@@ -100,11 +100,11 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
             Span::styled(
                 "EDIT:",
                 Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Yellow)
+                    .fg(theme.text.to_color())
+                    .bg(theme.footer_edit.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(YELLOW)),
+            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
         ])
     } else if *state.current_focus() == crate::state::Focus::View
         && matches!(state.current_view(), crate::state::View::ProjectTasks)
@@ -113,33 +113,33 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
             Span::styled(
                 "TASKS:",
                 Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Cyan)
+                    .fg(theme.text.to_color())
+                    .bg(theme.footer_tasks.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(YELLOW)),
+            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
         ])
     } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
         Line::from(vec![
             Span::styled(
                 "TASK:",
                 Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Magenta)
+                    .fg(theme.text.to_color())
+                    .bg(theme.footer_task.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(YELLOW)),
+            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
         ])
     } else {
         Line::from(vec![
             Span::styled(
                 "NORMAL:",
                 Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Black)
+                    .fg(theme.text.to_color())
+                    .bg(theme.footer_normal.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(YELLOW)),
+            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
         ])
     };
 
@@ -160,8 +160,8 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
         Line::from(vec![Span::styled(
             search_text,
             Style::default()
-                .fg(Color::White)
-                .bg(Color::Blue)
+                .fg(theme.text.to_color())
+                .bg(theme.footer_search.to_color())
                 .add_modifier(Modifier::BOLD),
         )])
     } else if !state.get_search_query().is_empty()
@@ -173,13 +173,13 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
         // Show query even if not in search mode (after exiting search)
         Line::from(vec![Span::styled(
             format!("/{}", state.get_search_query()),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.text_muted.to_color()),
         )])
     } else {
         // Show version number
         Line::from(vec![Span::styled(
             format!(" {}", env!("CARGO_PKG_VERSION")),
-            Style::default().fg(GREEN),
+            Style::default().fg(theme.secondary.to_color()),
         )])
     };
 
