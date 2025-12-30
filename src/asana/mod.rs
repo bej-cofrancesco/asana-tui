@@ -444,6 +444,8 @@ impl Asana {
                         gid,
                         name,
                         resource_subtype,
+                        representation_type: None, // Not available in task data
+                        id_prefix: None,           // Not available in task data
                         enum_options,
                         text_value,
                         number_value,
@@ -708,7 +710,7 @@ impl Asana {
 
         // Use GET /projects/{project_gid}/custom_field_settings
         // Then fetch each custom field definition
-        let uri = format!("projects/{}/custom_field_settings?opt_fields=custom_field.gid,custom_field.name,custom_field.resource_subtype,custom_field.enum_options.gid,custom_field.enum_options.name,custom_field.enum_options.enabled,custom_field.enum_options.color", project_gid);
+        let uri = format!("projects/{}/custom_field_settings?opt_fields=custom_field.gid,custom_field.name,custom_field.resource_subtype,custom_field.representation_type,custom_field.id_prefix,custom_field.enum_options.gid,custom_field.enum_options.name,custom_field.enum_options.enabled,custom_field.enum_options.color", project_gid);
         let request_url = format!("{}/{}", "https://app.asana.com/api/1.0", uri);
 
         let response = self
@@ -756,6 +758,14 @@ impl Asana {
                         .and_then(|v| v.as_str())
                         .unwrap_or("text")
                         .to_string();
+                    let representation_type = cf_obj
+                        .get("representation_type")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let id_prefix = cf_obj
+                        .get("id_prefix")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
 
                     // Parse enum options
                     let mut enum_options = Vec::new();
@@ -792,6 +802,8 @@ impl Asana {
                         gid,
                         name,
                         resource_subtype,
+                        representation_type,
+                        id_prefix,
                         enum_options,
                         text_value: None,
                         number_value: None,
@@ -980,67 +992,165 @@ impl Asana {
         // Add custom fields - validate GIDs and skip invalid ones
         if !custom_fields.is_empty() {
             // Get valid custom field GIDs for this project
-            let valid_cf_gids: std::collections::HashSet<String> = match self.get_project_custom_fields(project_gid).await {
-                Ok(cfs) => cfs.iter().map(|cf| cf.gid.clone()).collect(),
-                Err(e) => {
-                    warn!("Failed to fetch project custom fields for validation: {}", e);
-                    std::collections::HashSet::new()
-                }
-            };
-            
+            let valid_cf_gids: std::collections::HashSet<String> =
+                match self.get_project_custom_fields(project_gid).await {
+                    Ok(cfs) => cfs.iter().map(|cf| cf.gid.clone()).collect(),
+                    Err(e) => {
+                        warn!(
+                            "Failed to fetch project custom fields for validation: {}",
+                            e
+                        );
+                        std::collections::HashSet::new()
+                    }
+                };
+
             let mut custom_fields_array = Vec::new();
             for (gid, value) in custom_fields {
                 // Skip invalid GIDs (empty, "0", or not in project's custom fields)
-                if gid.is_empty() || gid == "0" || !valid_cf_gids.contains(gid) {
-                    warn!("Skipping invalid custom field GID: {}", gid);
+                if gid.is_empty() || gid == "0" {
+                    warn!("Skipping invalid custom field GID (empty or '0'): {}", gid);
                     continue;
                 }
-                
-                let mut cf_data = serde_json::json!({
-                    "gid": gid
-                });
-                match value {
-                    crate::state::CustomFieldValue::Text(s) if !s.is_empty() => {
-                        cf_data["text_value"] = serde_json::Value::String(s.clone());
+                if !valid_cf_gids.contains(gid.as_str()) {
+                    warn!(
+                        "Skipping custom field GID not in project: {} (valid GIDs: {:?})",
+                        gid, valid_cf_gids
+                    );
+                    continue;
+                }
+
+                // Only create cf_data if we have a valid value to set
+                // Each object must include the gid field
+                let cf_data = match value {
+                    crate::state::CustomFieldValue::Text(s) if !s.trim().is_empty() => {
+                        let cf = serde_json::json!({
+                            "gid": gid,
+                            "text_value": s.trim()
+                        });
+                        Some(cf)
                     }
                     crate::state::CustomFieldValue::Number(Some(n)) => {
                         if let Some(num) = serde_json::Number::from_f64(*n) {
-                            cf_data["number_value"] = serde_json::Value::Number(num);
+                            let cf = serde_json::json!({
+                                "gid": gid,
+                                "number_value": num
+                            });
+                            Some(cf)
                         } else {
                             warn!("Invalid number value for custom field {}, skipping", gid);
-                            continue;
+                            None
                         }
                     }
-                    crate::state::CustomFieldValue::Date(Some(d)) if !d.is_empty() => {
-                        cf_data["date_value"] = serde_json::json!({
-                            "date": d
+                    crate::state::CustomFieldValue::Date(Some(d)) if !d.trim().is_empty() => {
+                        let cf = serde_json::json!({
+                            "gid": gid,
+                            "date_value": {
+                                "date": d.trim()
+                            }
                         });
+                        Some(cf)
                     }
                     crate::state::CustomFieldValue::Enum(Some(enum_gid)) => {
-                        cf_data["enum_value"] = serde_json::json!({
-                            "gid": enum_gid
-                        });
+                        // Validate enum option GID
+                        if enum_gid.is_empty() || enum_gid == "0" {
+                            warn!(
+                                "Skipping invalid enum option GID for custom field {}: {}",
+                                gid, enum_gid
+                            );
+                            None
+                        } else {
+                            info!(
+                                "Adding enum custom field: gid={}, enum_gid={}",
+                                gid, enum_gid
+                            );
+                            let cf = serde_json::json!({
+                                "gid": gid,
+                                "enum_value": {
+                                    "gid": enum_gid
+                                }
+                            });
+                            Some(cf)
+                        }
                     }
                     crate::state::CustomFieldValue::MultiEnum(gids) if !gids.is_empty() => {
-                        cf_data["multi_enum_values"] = serde_json::Value::Array(
-                            gids.iter()
-                                .map(|gid| serde_json::json!({"gid": gid}))
-                                .collect(),
-                        );
+                        // Filter out invalid enum option GIDs
+                        let valid_gids: Vec<_> = gids
+                            .iter()
+                            .filter(|gid| !gid.is_empty() && *gid != "0")
+                            .map(|gid| serde_json::json!({"gid": gid}))
+                            .collect();
+                        if valid_gids.is_empty() {
+                            warn!("Skipping multi-enum with no valid option GIDs");
+                            None
+                        } else {
+                            let cf = serde_json::json!({
+                                "gid": gid,
+                                "multi_enum_values": valid_gids
+                            });
+                            Some(cf)
+                        }
                     }
                     crate::state::CustomFieldValue::People(gids) if !gids.is_empty() => {
-                        cf_data["people_value"] = serde_json::Value::Array(
-                            gids.iter()
-                                .map(|gid| serde_json::json!({"gid": gid}))
-                                .collect(),
-                        );
+                        // Filter out invalid people GIDs
+                        let valid_gids: Vec<_> = gids
+                            .iter()
+                            .filter(|gid| !gid.is_empty() && *gid != "0")
+                            .map(|gid| serde_json::json!({"gid": gid}))
+                            .collect();
+                        if valid_gids.is_empty() {
+                            warn!("Skipping people field with no valid user GIDs");
+                            None
+                        } else {
+                            let cf = serde_json::json!({
+                                "gid": gid,
+                                "people_value": valid_gids
+                            });
+                            Some(cf)
+                        }
                     }
-                    _ => continue, // Skip empty values
+                    _ => {
+                        // Skip empty values (Text(""), Enum(None), Number(None), Date(None), empty arrays)
+                        None
+                    }
+                };
+
+                // Only add if we have valid data
+                if let Some(cf) = cf_data {
+                    info!("Adding custom field to array: {:?}", cf);
+                    // Double-check that gid is not "0" before adding
+                    if let Some(gid_val) = cf.get("gid") {
+                        if let Some(gid_str) = gid_val.as_str() {
+                            if gid_str == "0" || gid_str.is_empty() {
+                                error!("ERROR: Attempted to add custom field with invalid GID '{}' - skipping!", gid_str);
+                                continue;
+                            }
+                        }
+                    }
+                    // Also check enum_value if present
+                    if let Some(enum_val) = cf.get("enum_value") {
+                        if let Some(enum_obj) = enum_val.as_object() {
+                            if let Some(enum_gid_val) = enum_obj.get("gid") {
+                                if let Some(enum_gid_str) = enum_gid_val.as_str() {
+                                    if enum_gid_str == "0" || enum_gid_str.is_empty() {
+                                        error!("ERROR: Attempted to add custom field with invalid enum_value GID '{}' - skipping!", enum_gid_str);
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    custom_fields_array.push(cf);
                 }
-                custom_fields_array.push(cf_data);
             }
             if !custom_fields_array.is_empty() {
+                info!(
+                    "Adding {} custom fields to create task request",
+                    custom_fields_array.len()
+                );
+                info!("Custom fields array: {:?}", custom_fields_array);
                 data["custom_fields"] = serde_json::Value::Array(custom_fields_array);
+            } else {
+                info!("No valid custom fields to add to create task request");
             }
         }
 
@@ -1048,6 +1158,10 @@ impl Asana {
             "data": data
         });
 
+        info!(
+            "Create task request body: {}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
         let response = self
             .client
             .call_with_body::<TaskModel>(reqwest::Method::POST, None, None, Some(body))
@@ -1156,61 +1270,182 @@ impl Asana {
         }
 
         // Add custom fields - validate GIDs and skip invalid ones
+        // NOTE: For updates, custom_fields must be an object/map, NOT an array
+        // Format: { "custom_field_gid": value } where value is:
+        //   - enum: just the enum GID string
+        //   - text: just the text string
+        //   - number: just the number
+        //   - date: date string (YYYY-MM-DD)
+        //   - multi_enum: array of enum GID strings
+        //   - people: array of user GID strings
         if !custom_fields.is_empty() {
+            // Check each custom field to see if it's a custom_id field (which cannot be manually updated)
+            let mut custom_id_gids = std::collections::HashSet::new();
+            for gid in custom_fields.keys() {
+                // Fetch the custom field definition to check if it's a custom_id field
+                let cf_uri = format!(
+                    "custom_fields/{}?opt_fields=representation_type,id_prefix",
+                    gid
+                );
+                let cf_url = format!("{}/{}", "https://app.asana.com/api/1.0", cf_uri);
+                let cf_response = self
+                    .client
+                    .http_client
+                    .get(&cf_url)
+                    .header(
+                        "Authorization",
+                        format!("Bearer {}", self.client.access_token),
+                    )
+                    .send()
+                    .await;
+
+                if let Ok(resp) = cf_response {
+                    if resp.status().is_success() {
+                        if let Ok(json) = resp.json::<serde_json::Value>().await {
+                            // Check if this is a custom_id field
+                            let is_custom_id = json
+                                .get("data")
+                                .map(|d| {
+                                    // Check representation_type == "custom_id" or if id_prefix is not null
+                                    let rep_type = d
+                                        .get("representation_type")
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s == "custom_id")
+                                        .unwrap_or(false);
+                                    let has_id_prefix =
+                                        d.get("id_prefix").map(|v| !v.is_null()).unwrap_or(false);
+                                    rep_type || has_id_prefix
+                                })
+                                .unwrap_or(false);
+
+                            if is_custom_id {
+                                warn!(
+                                    "Skipping custom_id field {} - cannot be manually updated",
+                                    gid
+                                );
+                                custom_id_gids.insert(gid.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
             // For updates, we can't easily validate against project fields, so we'll just check for obviously invalid GIDs
-            let mut custom_fields_array = Vec::new();
+            let mut custom_fields_obj = serde_json::Map::new();
             for (gid, value) in custom_fields {
+                // Skip custom_id fields (they cannot be manually updated)
+                if custom_id_gids.contains(gid) {
+                    continue;
+                }
                 // Skip invalid GIDs (empty or "0")
                 if gid.is_empty() || gid == "0" {
                     warn!("Skipping invalid custom field GID: {}", gid);
+                    info!(
+                        "Skipped custom field with GID '{}' because it's empty or '0'",
+                        gid
+                    );
                     continue;
                 }
-                
-                let mut cf_data = serde_json::json!({
-                    "gid": gid
-                });
-                match value {
-                    crate::state::CustomFieldValue::Text(s) if !s.is_empty() => {
-                        cf_data["text_value"] = serde_json::Value::String(s.clone());
+                info!("Processing custom field with GID: {}", gid);
+
+                // For updates, format is: { "custom_field_gid": direct_value }
+                let cf_value: Option<serde_json::Value> = match value {
+                    crate::state::CustomFieldValue::Text(s) if !s.trim().is_empty() => {
+                        Some(serde_json::Value::String(s.trim().to_string()))
                     }
                     crate::state::CustomFieldValue::Number(Some(n)) => {
                         if let Some(num) = serde_json::Number::from_f64(*n) {
-                            cf_data["number_value"] = serde_json::Value::Number(num);
+                            Some(serde_json::Value::Number(num))
                         } else {
                             warn!("Invalid number value for custom field {}, skipping", gid);
-                            continue;
+                            None
                         }
                     }
-                    crate::state::CustomFieldValue::Date(Some(d)) if !d.is_empty() => {
-                        cf_data["date_value"] = serde_json::json!({
-                            "date": d
-                        });
+                    crate::state::CustomFieldValue::Date(Some(d)) if !d.trim().is_empty() => {
+                        // For date, use format "YYYY-MM-DD" as a string
+                        Some(serde_json::Value::String(d.trim().to_string()))
                     }
                     crate::state::CustomFieldValue::Enum(Some(enum_gid)) => {
-                        cf_data["enum_value"] = serde_json::json!({
-                            "gid": enum_gid
-                        });
+                        // Validate enum option GID - for updates, send just the enum GID string directly
+                        if enum_gid.is_empty() || enum_gid == "0" {
+                            warn!(
+                                "Skipping invalid enum option GID for custom field {}: {}",
+                                gid, enum_gid
+                            );
+                            None
+                        } else {
+                            info!(
+                                "Adding enum custom field: gid={}, enum_gid={}",
+                                gid, enum_gid
+                            );
+                            // For updates, enum value is just the enum GID string
+                            Some(serde_json::Value::String(enum_gid.clone()))
+                        }
                     }
                     crate::state::CustomFieldValue::MultiEnum(gids) if !gids.is_empty() => {
-                        cf_data["multi_enum_values"] = serde_json::Value::Array(
-                            gids.iter()
-                                .map(|gid| serde_json::json!({"gid": gid}))
-                                .collect(),
-                        );
+                        // Filter out invalid enum option GIDs
+                        let valid_gids: Vec<_> = gids
+                            .iter()
+                            .filter(|gid| !gid.is_empty() && *gid != "0")
+                            .cloned()
+                            .collect();
+                        if valid_gids.is_empty() {
+                            warn!("Skipping multi-enum with no valid option GIDs");
+                            None
+                        } else {
+                            // For updates, multi-enum is an array of enum GID strings
+                            Some(serde_json::Value::Array(
+                                valid_gids
+                                    .iter()
+                                    .map(|gid| serde_json::Value::String(gid.clone()))
+                                    .collect(),
+                            ))
+                        }
                     }
                     crate::state::CustomFieldValue::People(gids) if !gids.is_empty() => {
-                        cf_data["people_value"] = serde_json::Value::Array(
-                            gids.iter()
-                                .map(|gid| serde_json::json!({"gid": gid}))
-                                .collect(),
-                        );
+                        // Filter out invalid people GIDs
+                        let valid_gids: Vec<_> = gids
+                            .iter()
+                            .filter(|gid| !gid.is_empty() && *gid != "0")
+                            .cloned()
+                            .collect();
+                        if valid_gids.is_empty() {
+                            warn!("Skipping people field with no valid user GIDs");
+                            None
+                        } else {
+                            // For updates, people is an array of user GID strings
+                            Some(serde_json::Value::Array(
+                                valid_gids
+                                    .iter()
+                                    .map(|gid| serde_json::Value::String(gid.clone()))
+                                    .collect(),
+                            ))
+                        }
                     }
-                    _ => continue, // Skip empty values
+                    _ => {
+                        // Skip empty values (Text(""), Enum(None), Number(None), Date(None), empty arrays)
+                        None
+                    }
+                };
+
+                // Only add if we have valid data
+                if let Some(cf_val) = cf_value {
+                    info!(
+                        "Adding custom field to object: gid={}, value={:?}",
+                        gid, cf_val
+                    );
+                    custom_fields_obj.insert(gid.clone(), cf_val);
                 }
-                custom_fields_array.push(cf_data);
             }
-            if !custom_fields_array.is_empty() {
-                data["custom_fields"] = serde_json::Value::Array(custom_fields_array);
+            if !custom_fields_obj.is_empty() {
+                info!(
+                    "Adding {} custom fields to update task request (as object)",
+                    custom_fields_obj.len()
+                );
+                info!("Custom fields object: {:?}", custom_fields_obj);
+                data["custom_fields"] = serde_json::Value::Object(custom_fields_obj);
+            } else {
+                info!("No valid custom fields to add to update task request");
             }
         }
 
@@ -1277,6 +1512,10 @@ impl Asana {
             "data": data
         });
 
+        info!(
+            "Update task request body: {}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
         let response = self
             .client
             .call_with_body::<TaskModel>(reqwest::Method::PUT, Some(task_gid), None, Some(body))

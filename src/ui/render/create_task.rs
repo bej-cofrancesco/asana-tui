@@ -32,7 +32,22 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &mut State) {
 
     let form_state = state.get_edit_form_state().unwrap_or(EditFormState::Name);
     // Clone custom fields early to avoid borrow checker issues
-    let custom_fields: Vec<CustomField> = state.get_project_custom_fields().to_vec();
+    // Filter out custom_id fields (they cannot be manually edited)
+    let custom_fields: Vec<CustomField> = state
+        .get_project_custom_fields()
+        .iter()
+        .filter(|cf| {
+            // Skip custom_id fields
+            let is_custom_id = cf
+                .representation_type
+                .as_ref()
+                .map(|s| s == "custom_id")
+                .unwrap_or(false)
+                || cf.id_prefix.is_some();
+            !is_custom_id
+        })
+        .cloned()
+        .collect();
 
     // Calculate which fields to show based on available height
     // Fields have different heights: Name/Assignee/DueDate/Section = 3, Notes = 5, Custom dropdowns = 7+
@@ -60,7 +75,15 @@ pub fn create_task(frame: &mut Frame, size: Rect, state: &mut State) {
         ];
         for (idx, cf) in custom_fields.iter().enumerate() {
             let height = match cf.resource_subtype.as_str() {
-                "enum" | "multi_enum" | "people" => 10, // Search (3) + dropdown (7)
+                "enum" | "multi_enum" | "people" => {
+                    // Dynamic height: 10 when editing, 3 when not
+                    if is_editing && matches!(form_state, EditFormState::CustomField(i) if i == idx)
+                    {
+                        10 // Search (3) + dropdown (7)
+                    } else {
+                        3
+                    }
+                }
                 _ => 3,
             };
             fields.push((5 + idx, "CustomField", Some(idx), height));

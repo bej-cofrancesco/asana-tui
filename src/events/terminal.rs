@@ -1452,29 +1452,10 @@ impl Handler {
                             if matches!(state.current_view(), crate::state::View::TaskDetail) {
                                 // Edit task from detail view
                                 debug!("Processing edit task event '{:?}'...", event);
-                                // Clone task data to avoid borrow checker issues
-                                let task_data = state.get_task_detail().map(|t| {
-                                    (
-                                        t.name.clone(),
-                                        t.notes.clone(),
-                                        t.assignee.as_ref().map(|a| a.gid.clone()),
-                                        t.due_on.clone(),
-                                        t.section.as_ref().map(|s| s.gid.clone()),
-                                    )
-                                });
-
-                                if let Some((name, notes, assignee_gid, due_on, section_gid)) =
-                                    task_data
-                                {
-                                    // Pre-populate form with task data
-                                    state.set_form_name(name);
-                                    state.set_form_notes(notes.unwrap_or_default());
-                                    state.set_form_assignee(assignee_gid);
-                                    state.set_form_due_on(due_on.unwrap_or_default());
-                                    state.set_form_section(section_gid);
-                                    state.set_edit_form_state(Some(
-                                        crate::state::EditFormState::Name,
-                                    ));
+                                // Initialize form with task data (including custom fields)
+                                if let Some(task) = state.get_task_detail() {
+                                    let task_clone = task.clone();
+                                    state.init_edit_form(&task_clone);
 
                                     // Load workspace users and sections for dropdowns
                                     if let Some(workspace) = state.get_active_workspace() {
@@ -1571,8 +1552,11 @@ impl Handler {
                                 }
                             } else if matches!(state.current_view(), crate::state::View::EditTask) {
                                 // Update task - only send fields that have changed
-                                let task_gid_opt = state.get_task_detail().map(|t| t.gid.clone());
-                                if let Some(task_gid) = task_gid_opt {
+                                debug!("Processing save task event (EditTask)...");
+                                if let Some(task) = state.get_task_detail() {
+                                    let task_gid = task.gid.clone();
+                                    info!("Saving task {}...", task_gid);
+
                                     // Compare current values with original values - clone all values first
                                     let original_name = state.get_original_form_name().to_string();
                                     let original_notes =
@@ -1589,6 +1573,43 @@ impl Handler {
                                     let current_assignee = state.get_form_assignee().cloned();
                                     let current_due_on = state.get_form_due_on().to_string();
                                     let current_section = state.get_form_section().cloned();
+                                    let current_custom_fields =
+                                        state.get_form_custom_field_values().clone();
+
+                                    // Build a map of original custom field values from the task
+                                    let mut original_cf_map = std::collections::HashMap::new();
+                                    for cf in &task.custom_fields {
+                                        let value = match cf.resource_subtype.as_str() {
+                                            "text" => crate::state::CustomFieldValue::Text(
+                                                cf.text_value.clone().unwrap_or_default(),
+                                            ),
+                                            "number" => crate::state::CustomFieldValue::Number(
+                                                cf.number_value,
+                                            ),
+                                            "date" => crate::state::CustomFieldValue::Date(
+                                                cf.date_value.clone(),
+                                            ),
+                                            "enum" => crate::state::CustomFieldValue::Enum(
+                                                cf.enum_value.as_ref().map(|e| e.gid.clone()),
+                                            ),
+                                            "multi_enum" => {
+                                                crate::state::CustomFieldValue::MultiEnum(
+                                                    cf.multi_enum_values
+                                                        .iter()
+                                                        .map(|e| e.gid.clone())
+                                                        .collect(),
+                                                )
+                                            }
+                                            "people" => crate::state::CustomFieldValue::People(
+                                                cf.people_value
+                                                    .iter()
+                                                    .map(|u| u.gid.clone())
+                                                    .collect(),
+                                            ),
+                                            _ => continue,
+                                        };
+                                        original_cf_map.insert(cf.gid.clone(), value);
+                                    }
 
                                     // Build update fields, only including changed non-empty values
                                     let mut name_val = None;
@@ -1640,16 +1661,25 @@ impl Handler {
                                         }
                                     }
 
+                                    // Check if custom fields have changed
+                                    let has_custom_field_changes =
+                                        current_custom_fields != original_cf_map;
+
                                     // Check if any field has changed
                                     let has_other_changes = name_val.is_some()
                                         || notes_val.is_some()
                                         || assignee_val.is_some()
                                         || due_on_val.is_some();
 
+                                    let has_changes = has_other_changes
+                                        || section_val.is_some()
+                                        || has_custom_field_changes;
+
                                     // Only dispatch if there are actual changes
                                     // If only section changed, UpdateTaskFields will handle it via add_task_to_section
                                     // without sending a PUT request (handled in asana/mod.rs)
-                                    if has_other_changes || section_val.is_some() {
+                                    if has_changes {
+                                        info!("Dispatching UpdateTaskFields with changes");
                                         state.dispatch(
                                             crate::events::network::Event::UpdateTaskFields {
                                                 gid: task_gid,
@@ -1659,15 +1689,20 @@ impl Handler {
                                                 due_on: due_on_val,
                                                 section: section_val,
                                                 completed: None,
-                                                custom_fields: state
-                                                    .get_form_custom_field_values()
-                                                    .clone(),
+                                                custom_fields: current_custom_fields,
                                             },
                                         );
+                                        state.clear_form();
+                                        state.pop_view();
+                                    } else {
+                                        info!(
+                                            "No changes detected, closing edit mode without saving"
+                                        );
+                                        state.clear_form();
+                                        state.pop_view();
                                     }
-
-                                    state.clear_form();
-                                    state.pop_view();
+                                } else {
+                                    warn!("Cannot save task: no task detail available");
                                 }
                             }
                         } else {

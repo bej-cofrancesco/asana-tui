@@ -2202,6 +2202,7 @@ impl State {
         self.original_form_section = task.section.as_ref().map(|s| s.gid.clone());
         // Initialize custom field values from task
         self.form_custom_field_values.clear();
+        self.custom_field_dropdown_index.clear();
         for cf in &task.custom_fields {
             let value = match cf.resource_subtype.as_str() {
                 "text" => CustomFieldValue::Text(cf.text_value.clone().unwrap_or_default()),
@@ -2217,7 +2218,31 @@ impl State {
                 _ => continue,
             };
             self.form_custom_field_values.insert(cf.gid.clone(), value);
+
+            // Initialize dropdown index for enum fields with selected values
+            if cf.resource_subtype == "enum" {
+                if let Some(selected_enum_gid) = cf.enum_value.as_ref().map(|e| &e.gid) {
+                    // Find the project custom field definition to get enum options
+                    if let Some(project_cf) = self
+                        .project_custom_fields
+                        .iter()
+                        .find(|pcf| pcf.gid == cf.gid)
+                    {
+                        if let Some(index) = project_cf
+                            .enum_options
+                            .iter()
+                            .position(|eo| eo.gid == *selected_enum_gid)
+                        {
+                            self.custom_field_dropdown_index
+                                .insert(cf.gid.clone(), index);
+                        }
+                    }
+                }
+            }
         }
+        // Initialize assignee and section dropdown indices
+        self.init_assignee_dropdown_index();
+        self.init_section_dropdown_index();
         self.edit_form_state = Some(EditFormState::Name);
         self
     }
