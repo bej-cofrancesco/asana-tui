@@ -1,12 +1,12 @@
 [package]
 name = "asana-tui"
 description = "A terminal user interface for Asana"
-repository = "https://github.com/drewnorman/asana-tui"
+repository = "https://github.com/bej-cofrancesco/asana-tui"
 keywords = ["asana", "tui", "cli", "terminal"]
 categories = ["command-line-utilities"]
-version = "0.1.0"
-authors = ["Drew Norman <drew@adre.me>"]
-edition = "2021"
+version = "1.0.0"
+authors = ["Benjamin Cofrancesco <benjamin@cofrancesco.com>"]
+edition = "2024"
 license = "MIT"
 
 [dependencies]
