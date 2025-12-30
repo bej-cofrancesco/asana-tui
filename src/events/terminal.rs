@@ -175,7 +175,7 @@ impl Handler {
                                         _ => {}
                                     }
                                 }
-                                Some(crate::state::EditFormState::CustomField(idx)) => {
+                                Some(crate::state::EditFormState::CustomField(_idx)) => {
                                     // Handle custom field editing based on field type
                                     // Clone custom field data to avoid borrow checker issues
                                     let (cf_gid, cf_subtype) =

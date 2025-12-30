@@ -156,7 +156,7 @@ fn recently_completed(frame: &mut Frame, size: Rect, state: &mut State) {
     }
 }
 
-fn task_list(tasks: &[crate::asana::Task]) -> ratatui::widgets::List {
+fn task_list(tasks: &[crate::asana::Task]) -> ratatui::widgets::List<'_> {
     if tasks.is_empty() {
         return ratatui::widgets::List::new(vec![ratatui::widgets::ListItem::new("Loading...")]);
     }
@@ -182,7 +182,7 @@ fn view_block<'a>(title: &'a str, state: &mut State) -> Block<'a> {
 
 fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
     use ratatui::{
-        layout::{Alignment, Constraint, Direction, Layout},
+        layout::Alignment,
         style::{Color, Modifier, Style},
         text::{Line, Span},
         widgets::{Block, Borders, Clear, Paragraph, Wrap},

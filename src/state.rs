@@ -47,9 +47,11 @@ pub enum View {
     RecentlyCompleted,
     ProjectTasks,
     TaskDetail,
+    #[allow(dead_code)]
     KanbanBoard,
     CreateTask,
     EditTask,
+    #[allow(dead_code)]
     MoveTaskSection, // Modal for selecting section to move task to
 }
 
@@ -78,8 +80,11 @@ pub enum EditFormState {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TaskFilter {
     All,
+    #[allow(dead_code)]
     Incomplete,
+    #[allow(dead_code)]
     Completed,
+    #[allow(dead_code)]
     Assignee(Option<String>), // Filter by assignee GID (None = unassigned)
 }
 
@@ -133,14 +138,17 @@ pub struct State {
     workspace_users: Vec<User>,          // Users for assignment dropdowns
     task_stories: Vec<Story>,            // Comments for current task
     view_mode: ViewMode,                 // List or Kanban view
+    #[allow(dead_code)]
     edit_mode: bool,                     // Whether in edit mode
     edit_form_state: Option<EditFormState>, // Current form field being edited
     field_editing_mode: bool,            // Whether actively editing a field (vs navigating)
     kanban_column_index: usize,          // Current column in kanban view
     kanban_task_index: usize,            // Current task index in selected column
+    #[allow(dead_code)]
     kanban_horizontal_scroll: usize,     // Horizontal scroll offset for kanban columns
     comment_input_mode: bool,            // Whether in comment input mode
     comment_input_text: String,          // Current comment text being typed
+    #[allow(dead_code)]
     comments_scroll_offset: usize,       // Scroll offset for comments list
     details_scroll_offset: usize,        // Scroll offset for details panel
     notes_scroll_offset: usize,          // Scroll offset for notes panel
@@ -825,12 +833,14 @@ impl State {
 
     /// Get the current task filter.
     ///
+    #[allow(dead_code)]
     pub fn get_task_filter(&self) -> TaskFilter {
         self.task_filter.clone()
     }
 
     /// Set the task filter.
     ///
+    #[allow(dead_code)]
     pub fn set_task_filter(&mut self, filter: TaskFilter) -> &mut Self {
         self.task_filter = filter;
         // Update filtered tasks when filter changes
@@ -840,6 +850,7 @@ impl State {
 
     /// Cycle to the next task filter.
     ///
+    #[allow(dead_code)]
     pub fn next_task_filter(&mut self) -> &mut Self {
         let old_filter = self.task_filter.clone();
         self.task_filter = match &self.task_filter {
@@ -954,6 +965,7 @@ impl State {
         &self.task_stories
     }
 
+    #[allow(dead_code)]
     pub fn get_comments_scroll_offset(&self) -> usize {
         self.comments_scroll_offset
     }
@@ -1012,6 +1024,7 @@ impl State {
 
     // Details panel scrolling
 
+    #[allow(dead_code)]
     pub fn get_details_scroll_offset(&self) -> usize {
         self.details_scroll_offset
     }
@@ -1032,6 +1045,7 @@ impl State {
         self
     }
 
+    #[allow(dead_code)]
     pub fn reset_details_scroll(&mut self) -> &mut Self {
         self.details_scroll_offset = 0;
         self
@@ -1039,6 +1053,7 @@ impl State {
 
     // Notes panel scrolling
 
+    #[allow(dead_code)]
     pub fn get_notes_scroll_offset(&self) -> usize {
         self.notes_scroll_offset
     }
@@ -1058,6 +1073,7 @@ impl State {
         self
     }
 
+    #[allow(dead_code)]
     pub fn reset_notes_scroll(&mut self) -> &mut Self {
         self.notes_scroll_offset = 0;
         self
@@ -1087,6 +1103,7 @@ impl State {
         self
     }
 
+    #[allow(dead_code)]
     pub fn reset_task_panel(&mut self) -> &mut Self {
         self.current_task_panel = TaskDetailPanel::Details;
         self
@@ -1142,12 +1159,14 @@ impl State {
 
     /// Get kanban horizontal scroll offset.
     ///
+    #[allow(dead_code)]
     pub fn get_kanban_horizontal_scroll(&self) -> usize {
         self.kanban_horizontal_scroll
     }
 
     /// Set kanban horizontal scroll offset.
     ///
+    #[allow(dead_code)]
     pub fn set_kanban_horizontal_scroll(&mut self, offset: usize) -> &mut Self {
         self.kanban_horizontal_scroll = offset;
         self
@@ -1155,6 +1174,7 @@ impl State {
 
     /// Scroll kanban columns left.
     ///
+    #[allow(dead_code)]
     pub fn scroll_kanban_left(&mut self) -> &mut Self {
         if self.kanban_horizontal_scroll > 0 {
             self.kanban_horizontal_scroll -= 1;
@@ -1164,6 +1184,7 @@ impl State {
 
     /// Scroll kanban columns right.
     ///
+    #[allow(dead_code)]
     pub fn scroll_kanban_right(&mut self) -> &mut Self {
         self.kanban_horizontal_scroll += 1;
         self
@@ -1541,6 +1562,7 @@ impl State {
 
     /// Set form name.
     ///
+    #[allow(dead_code)]
     pub fn set_form_name(&mut self, name: String) -> &mut Self {
         self.form_name = name;
         self
@@ -1594,6 +1616,7 @@ impl State {
 
     /// Set form assignee.
     ///
+    #[allow(dead_code)]
     pub fn set_form_assignee(&mut self, assignee: Option<String>) -> &mut Self {
         self.form_assignee = assignee;
         self
@@ -1607,6 +1630,7 @@ impl State {
 
     /// Set form due date.
     ///
+    #[allow(dead_code)]
     pub fn set_form_due_on(&mut self, due_on: String) -> &mut Self {
         self.form_due_on = due_on;
         self
@@ -1664,6 +1688,7 @@ impl State {
 
     /// Set form section.
     ///
+    #[allow(dead_code)]
     pub fn set_form_section(&mut self, section: Option<String>) -> &mut Self {
         self.form_section = section;
         self
@@ -1673,6 +1698,7 @@ impl State {
         self.assignee_dropdown_index
     }
 
+    #[allow(dead_code)]
     pub fn set_assignee_dropdown_index(&mut self, index: usize) -> &mut Self {
         self.assignee_dropdown_index = index;
         self
@@ -1759,6 +1785,7 @@ impl State {
         &self.form_assignee_search
     }
 
+    #[allow(dead_code)]
     pub fn clear_assignee_search(&mut self) -> &mut Self {
         self.form_assignee_search.clear();
         self.assignee_dropdown_index = 0;
@@ -1769,6 +1796,7 @@ impl State {
         self.section_dropdown_index
     }
 
+    #[allow(dead_code)]
     pub fn set_section_dropdown_index(&mut self, index: usize) -> &mut Self {
         self.section_dropdown_index = index;
         self
@@ -1806,6 +1834,7 @@ impl State {
         &self.form_section_search
     }
 
+    #[allow(dead_code)]
     pub fn clear_section_search(&mut self) -> &mut Self {
         self.form_section_search.clear();
         self.section_dropdown_index = 0;
@@ -1911,6 +1940,7 @@ impl State {
 
     /// Set custom field value for a given GID.
     ///
+    #[allow(dead_code)]
     pub fn set_custom_field_value(&mut self, gid: String, value: CustomFieldValue) -> &mut Self {
         self.form_custom_field_values.insert(gid, value);
         self
@@ -2156,6 +2186,7 @@ impl State {
 
     /// Get form scroll offset.
     ///
+    #[allow(dead_code)]
     pub fn get_form_scroll_offset(&self) -> usize {
         self.form_scroll_offset
     }
@@ -2171,6 +2202,7 @@ impl State {
 
     /// Scroll form down (show later fields).
     ///
+    #[allow(dead_code)]
     pub fn scroll_form_down(&mut self) -> &mut Self {
         // Don't scroll past the last field - limit is handled in rendering
         self.form_scroll_offset += 1;
@@ -2179,6 +2211,7 @@ impl State {
 
     /// Get total number of form fields (standard + custom).
     ///
+    #[allow(dead_code)]
     pub fn get_total_form_field_count(&self) -> usize {
         // Standard fields: Name, Notes, Assignee, DueDate, Section = 5
         5 + self.project_custom_fields.len()
