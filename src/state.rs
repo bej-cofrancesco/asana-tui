@@ -1957,30 +1957,113 @@ impl State {
         self
     }
 
-    /// Add character to custom field text value.
+    /// Add character to custom field text/number/date value.
     ///
-    pub fn add_custom_field_text_char(&mut self, gid: String, c: char) -> &mut Self {
-        let current = self
-            .form_custom_field_values
-            .get(&gid)
-            .and_then(|v| match v {
-                CustomFieldValue::Text(s) => Some(s.clone()),
-                _ => None,
-            })
-            .unwrap_or_default();
-        self.form_custom_field_values
-            .insert(gid, CustomFieldValue::Text(current + &c.to_string()));
+    pub fn add_custom_field_text_char(
+        &mut self,
+        gid: String,
+        c: char,
+        field_type: &str,
+    ) -> &mut Self {
+        match field_type {
+            "number" => {
+                // For number fields, parse the current value and append the character
+                let current_text = self
+                    .form_custom_field_values
+                    .get(&gid)
+                    .and_then(|v| match v {
+                        CustomFieldValue::Number(Some(n)) => Some(n.to_string()),
+                        CustomFieldValue::Text(s) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+
+                let new_text = current_text + &c.to_string();
+                // Try to parse as number
+                if let Ok(num) = new_text.parse::<f64>() {
+                    self.form_custom_field_values
+                        .insert(gid, CustomFieldValue::Number(Some(num)));
+                } else {
+                    // If parsing fails, store as text (will be ignored when sending)
+                    self.form_custom_field_values
+                        .insert(gid, CustomFieldValue::Text(new_text));
+                }
+            }
+            _ => {
+                // For text and date fields, store as text
+                let current = self
+                    .form_custom_field_values
+                    .get(&gid)
+                    .and_then(|v| match v {
+                        CustomFieldValue::Text(s) => Some(s.clone()),
+                        CustomFieldValue::Date(Some(d)) => Some(d.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+
+                let new_value = current + &c.to_string();
+                if field_type == "date" {
+                    self.form_custom_field_values
+                        .insert(gid, CustomFieldValue::Date(Some(new_value)));
+                } else {
+                    self.form_custom_field_values
+                        .insert(gid, CustomFieldValue::Text(new_value));
+                }
+            }
+        }
         self
     }
 
-    /// Remove character from custom field text value.
+    /// Remove character from custom field text/number/date value.
     ///
-    pub fn remove_custom_field_text_char(&mut self, gid: &str) -> &mut Self {
-        if let Some(CustomFieldValue::Text(s)) = self.form_custom_field_values.get(gid) {
-            let mut new_s = s.clone();
-            new_s.pop();
-            self.form_custom_field_values
-                .insert(gid.to_string(), CustomFieldValue::Text(new_s));
+    pub fn remove_custom_field_text_char(&mut self, gid: &str, field_type: &str) -> &mut Self {
+        match field_type {
+            "number" => {
+                // For number fields, get current value and remove last character
+                let current_text = self
+                    .form_custom_field_values
+                    .get(gid)
+                    .and_then(|v| match v {
+                        CustomFieldValue::Number(Some(n)) => Some(n.to_string()),
+                        CustomFieldValue::Text(s) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+
+                let mut new_text = current_text;
+                new_text.pop();
+
+                if new_text.is_empty() {
+                    self.form_custom_field_values.remove(gid);
+                } else if let Ok(num) = new_text.parse::<f64>() {
+                    self.form_custom_field_values
+                        .insert(gid.to_string(), CustomFieldValue::Number(Some(num)));
+                } else {
+                    self.form_custom_field_values
+                        .insert(gid.to_string(), CustomFieldValue::Text(new_text));
+                }
+            }
+            _ => {
+                // For text and date fields
+                if let Some(value) = self.form_custom_field_values.get(gid) {
+                    let mut new_value = match value {
+                        CustomFieldValue::Text(s) => s.clone(),
+                        CustomFieldValue::Date(Some(d)) => d.clone(),
+                        _ => return self,
+                    };
+                    new_value.pop();
+
+                    if new_value.is_empty() {
+                        self.form_custom_field_values.remove(gid);
+                    } else if field_type == "date" {
+                        self.form_custom_field_values
+                            .insert(gid.to_string(), CustomFieldValue::Date(Some(new_value)));
+                    } else {
+                        self.form_custom_field_values
+                            .insert(gid.to_string(), CustomFieldValue::Text(new_value));
+                    }
+                }
+            }
         }
         self
     }

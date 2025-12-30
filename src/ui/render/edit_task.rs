@@ -35,15 +35,26 @@ pub fn edit_task(frame: &mut Frame, size: Rect, state: &mut State) {
     // Calculate which fields to show based on available height
     // Fields have different heights: Name/Assignee/DueDate/Section = 3, Notes = 5, Custom dropdowns = 7+
     let available_height = chunks[1].height;
+    let is_editing = state.is_field_editing_mode();
 
     // Build list of all fields with their heights
     let all_fields: Vec<(usize, &str, Option<usize>, u16)> = {
+        let assignee_height = if is_editing && matches!(form_state, EditFormState::Assignee) {
+            10 // Search (3) + dropdown (7)
+        } else {
+            3
+        };
+        let section_height = if is_editing && matches!(form_state, EditFormState::Section) {
+            10 // Search (3) + dropdown (7)
+        } else {
+            3
+        };
         let mut fields = vec![
             (0, "Name", None, 3),
             (1, "Notes", None, 5),
-            (2, "Assignee", None, 3),
+            (2, "Assignee", None, assignee_height),
             (3, "DueDate", None, 3),
-            (4, "Section", None, 3),
+            (4, "Section", None, section_height),
         ];
         for (idx, cf) in custom_fields.iter().enumerate() {
             let height = match cf.resource_subtype.as_str() {
@@ -144,8 +155,6 @@ pub fn edit_task(frame: &mut Frame, size: Rect, state: &mut State) {
         .constraints(constraints)
         .split(chunks[1]);
 
-    let is_editing = state.is_field_editing_mode();
-
     // Render only visible fields
     for (chunk_idx, (_field_idx, field_type, custom_idx, _)) in visible_fields.iter().enumerate() {
         if chunk_idx >= form_chunks.len() {
@@ -173,25 +182,32 @@ pub fn edit_task(frame: &mut Frame, size: Rect, state: &mut State) {
                 );
             }
             "Assignee" => {
-                // Always show dropdown format when selected, like custom fields
-                if form_state == EditFormState::Assignee {
+                // Show dropdown only when in editing mode, like custom fields
+                if is_editing && form_state == EditFormState::Assignee {
                     form_dropdowns::render_assignee_dropdown(frame, form_chunks[chunk_idx], state);
                 } else {
+                    // Show simple field when not editing
                     let assignee_text = if let Some(assignee_gid) = state.get_form_assignee() {
                         state
                             .get_workspace_users()
                             .iter()
                             .find(|u| u.gid == *assignee_gid)
-                            .map(|u| u.name.as_str())
-                            .unwrap_or("Unknown")
+                            .map(|u| {
+                                if !u.email.is_empty() {
+                                    format!("{} ({})", u.name, u.email)
+                                } else {
+                                    u.name.clone()
+                                }
+                            })
+                            .unwrap_or_else(|| "Unknown".to_string())
                     } else {
-                        "None"
+                        "None".to_string()
                     };
                     render_field(
                         frame,
                         form_chunks[chunk_idx],
                         "Assignee (dropdown)",
-                        assignee_text,
+                        &assignee_text,
                         form_state == EditFormState::Assignee,
                         false,
                     );
@@ -208,10 +224,11 @@ pub fn edit_task(frame: &mut Frame, size: Rect, state: &mut State) {
                 );
             }
             "Section" => {
-                // Always show dropdown format when selected, like custom fields
-                if form_state == EditFormState::Section {
+                // Show dropdown only when in editing mode, like custom fields
+                if is_editing && form_state == EditFormState::Section {
                     form_dropdowns::render_section_dropdown(frame, form_chunks[chunk_idx], state);
                 } else {
+                    // Show simple field when not editing
                     let section_text = if let Some(section_gid) = state.get_form_section() {
                         state
                             .get_sections()
@@ -420,7 +437,7 @@ fn render_custom_field_inner(
         }
         "enum" => {
             if is_editing {
-                render_enum_dropdown(frame, size, cf, &cf.gid, state);
+                form_dropdowns::render_enum_dropdown(frame, size, cf, &cf.gid, state);
             } else {
                 let selected_text = match &value {
                     Some(CustomFieldValue::Enum(Some(gid))) => cf
@@ -507,90 +524,7 @@ fn render_custom_field_inner(
     }
 }
 
-fn render_enum_dropdown(
-    frame: &mut Frame,
-    size: Rect,
-    cf: &CustomField,
-    cf_gid: &str,
-    state: &State,
-) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Search input (same size as original field)
-            Constraint::Min(7), // Dropdown list (max 5 items + borders, but allow more if space available)
-        ])
-        .split(size);
-
-    // Search input - use same pattern as assignee/sections
-    let search_text = state.get_custom_field_search(cf_gid);
-    let search_block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!("Search {}", cf.name))
-        .border_style(styling::active_block_border_style());
-    let search_para = Paragraph::new(format!("> {}", search_text))
-        .block(search_block)
-        .style(styling::normal_text_style());
-    frame.render_widget(search_para, chunks[0]);
-
-    // Filtered enum options list - limit to max 5 visible items
-    let filtered: Vec<_> = cf
-        .enum_options
-        .iter()
-        .filter(|eo| {
-            eo.enabled
-                && (search_text.is_empty()
-                    || eo.name.to_lowercase().contains(&search_text.to_lowercase()))
-        })
-        .collect();
-    let selected_index = state.get_custom_field_dropdown_index(cf_gid);
-
-    // Calculate visible range (show max 5 items, centered around selected)
-    let max_visible = 5;
-    let total_items = filtered.len();
-    let start_index = if total_items <= max_visible {
-        0
-    } else {
-        (selected_index as i32 - max_visible as i32 / 2)
-            .max(0)
-            .min((total_items - max_visible) as i32) as usize
-    };
-    let end_index = (start_index + max_visible).min(total_items);
-    let visible_options = &filtered[start_index..end_index];
-    let visible_selected = selected_index.saturating_sub(start_index);
-
-    let items: Vec<ListItem> = visible_options
-        .iter()
-        .map(|eo| ListItem::new(eo.name.clone()))
-        .collect();
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(
-            "{} ({} results, ↑ / ↓ to navigate, Enter to select)",
-            cf.name,
-            filtered.len()
-        ))
-        .border_style(styling::active_block_border_style());
-
-    // Use ListState for proper selection display
-    let mut list_state = ratatui::widgets::ListState::default();
-    if !items.is_empty() {
-        list_state.select(Some(visible_selected.min(items.len().saturating_sub(1))));
-    }
-
-    let list = List::new(items)
-        .block(block)
-        .style(styling::normal_text_style())
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        );
-
-    frame.render_stateful_widget(list, chunks[1], &mut list_state);
-}
+// render_enum_dropdown is now in form_dropdowns.rs
 
 fn render_multi_enum_dropdown(
     frame: &mut Frame,

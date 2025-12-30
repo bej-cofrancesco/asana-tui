@@ -977,10 +977,25 @@ impl Asana {
             data["due_on"] = serde_json::Value::String(due_on_val.to_string());
         }
 
-        // Add custom fields
+        // Add custom fields - validate GIDs and skip invalid ones
         if !custom_fields.is_empty() {
+            // Get valid custom field GIDs for this project
+            let valid_cf_gids: std::collections::HashSet<String> = match self.get_project_custom_fields(project_gid).await {
+                Ok(cfs) => cfs.iter().map(|cf| cf.gid.clone()).collect(),
+                Err(e) => {
+                    warn!("Failed to fetch project custom fields for validation: {}", e);
+                    std::collections::HashSet::new()
+                }
+            };
+            
             let mut custom_fields_array = Vec::new();
             for (gid, value) in custom_fields {
+                // Skip invalid GIDs (empty, "0", or not in project's custom fields)
+                if gid.is_empty() || gid == "0" || !valid_cf_gids.contains(gid) {
+                    warn!("Skipping invalid custom field GID: {}", gid);
+                    continue;
+                }
+                
                 let mut cf_data = serde_json::json!({
                     "gid": gid
                 });
@@ -992,8 +1007,8 @@ impl Asana {
                         if let Some(num) = serde_json::Number::from_f64(*n) {
                             cf_data["number_value"] = serde_json::Value::Number(num);
                         } else {
-                            cf_data["number_value"] =
-                                serde_json::Value::Number(serde_json::Number::from(0));
+                            warn!("Invalid number value for custom field {}, skipping", gid);
+                            continue;
                         }
                     }
                     crate::state::CustomFieldValue::Date(Some(d)) if !d.is_empty() => {
@@ -1140,10 +1155,17 @@ impl Asana {
             data["completed"] = serde_json::Value::Bool(completed_val);
         }
 
-        // Add custom fields
+        // Add custom fields - validate GIDs and skip invalid ones
         if !custom_fields.is_empty() {
+            // For updates, we can't easily validate against project fields, so we'll just check for obviously invalid GIDs
             let mut custom_fields_array = Vec::new();
             for (gid, value) in custom_fields {
+                // Skip invalid GIDs (empty or "0")
+                if gid.is_empty() || gid == "0" {
+                    warn!("Skipping invalid custom field GID: {}", gid);
+                    continue;
+                }
+                
                 let mut cf_data = serde_json::json!({
                     "gid": gid
                 });
@@ -1155,8 +1177,8 @@ impl Asana {
                         if let Some(num) = serde_json::Number::from_f64(*n) {
                             cf_data["number_value"] = serde_json::Value::Number(num);
                         } else {
-                            cf_data["number_value"] =
-                                serde_json::Value::Number(serde_json::Number::from(0));
+                            warn!("Invalid number value for custom field {}, skipping", gid);
+                            continue;
                         }
                     }
                     crate::state::CustomFieldValue::Date(Some(d)) if !d.is_empty() => {
