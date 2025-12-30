@@ -36,7 +36,11 @@ pub fn edit_task(frame: &mut Frame, size: Rect, state: &mut State) {
         .iter()
         .filter(|cf| {
             // Skip custom_id fields
-            let is_custom_id = cf.representation_type.as_ref().map(|s| s == "custom_id").unwrap_or(false)
+            let is_custom_id = cf
+                .representation_type
+                .as_ref()
+                .map(|s| s == "custom_id")
+                .unwrap_or(false)
                 || cf.id_prefix.is_some();
             !is_custom_id
         })
