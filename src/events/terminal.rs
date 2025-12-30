@@ -34,14 +34,16 @@ impl Handler {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel();
         let tx_clone = tx.clone();
-        thread::spawn(move || loop {
-            let tick_rate = Duration::from_millis(TICK_RATE_IN_MS);
-            if event::poll(tick_rate).unwrap() {
-                if let CrosstermEvent::Key(key) = event::read().unwrap() {
-                    tx_clone.send(Event::Input(key)).unwrap();
+        thread::spawn(move || {
+            loop {
+                let tick_rate = Duration::from_millis(TICK_RATE_IN_MS);
+                if event::poll(tick_rate).unwrap() {
+                    if let CrosstermEvent::Key(key) = event::read().unwrap() {
+                        tx_clone.send(Event::Input(key)).unwrap();
+                    }
                 }
+                tx_clone.send(Event::Tick).unwrap();
             }
-            tx_clone.send(Event::Tick).unwrap();
         });
         Handler { rx, _tx: tx }
     }
@@ -1083,7 +1085,8 @@ impl Handler {
                                 Focus::View => {
                                     // Only navigate tasks if we're in a view that has tasks
                                     // (not Welcome view)
-                                    if !matches!(state.current_view(), crate::state::View::Welcome) {
+                                    if !matches!(state.current_view(), crate::state::View::Welcome)
+                                    {
                                         debug!("Processing previous task event '{:?}'...", event);
                                         state.previous_task_index();
                                     } else {
@@ -1201,7 +1204,8 @@ impl Handler {
                                 Focus::View => {
                                     // Only navigate tasks if we're in a view that has tasks
                                     // (not Welcome view)
-                                    if !matches!(state.current_view(), crate::state::View::Welcome) {
+                                    if !matches!(state.current_view(), crate::state::View::Welcome)
+                                    {
                                         debug!("Processing next task event '{:?}'...", event);
                                         state.next_task_index();
                                     } else {
@@ -1458,7 +1462,6 @@ impl Handler {
                                             state.set_delete_confirmation(task.gid.clone());
                                         }
                                     } else {
-                                        // Delete task from list views (MyTasks, etc.)
                                         debug!("Processing delete task event '{:?}'...", event);
                                         state.delete_selected_task();
                                     }
@@ -1852,9 +1855,10 @@ impl Handler {
                     } => {
                         if state.is_search_mode() {
                             state.add_search_char('t');
-                        } else if !state.is_debug_mode() 
+                        } else if !state.is_debug_mode()
                             && !state.has_theme_selector()
-                            && matches!(state.current_view(), crate::state::View::Welcome) {
+                            && matches!(state.current_view(), crate::state::View::Welcome)
+                        {
                             // Open theme selector modal (only available on welcome screen)
                             debug!("Opening theme selector modal...");
                             state.open_theme_selector();

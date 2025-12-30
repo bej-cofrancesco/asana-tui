@@ -42,9 +42,6 @@ pub enum Menu {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum View {
     Welcome,
-    MyTasks,
-    RecentlyModified,
-    RecentlyCompleted,
     ProjectTasks,
     TaskDetail,
     #[allow(dead_code)]
@@ -91,11 +88,7 @@ pub enum TaskFilter {
 /// Get the base shortcuts list.
 ///
 pub fn base_shortcuts() -> Vec<String> {
-    vec![
-        "My Tasks".to_string(),
-        "Recently Modified".to_string(),
-        "Recently Completed".to_string(),
-    ]
+    vec![]
 }
 
 /// Houses data representative of application state.
@@ -133,25 +126,25 @@ pub struct State {
     task_filter: TaskFilter,
     delete_confirmation: Option<String>, // GID of task pending deletion confirmation
     move_task_gid: Option<String>,       // GID of task being moved (for section selection modal)
-    theme_selector_open: bool,            // Whether theme selector modal is open
-    theme_dropdown_index: usize,          // Selected index in theme selector
+    theme_selector_open: bool,           // Whether theme selector modal is open
+    theme_dropdown_index: usize,         // Selected index in theme selector
     current_task_detail: Option<Task>,   // Currently viewed task with full details
     sections: Vec<Section>,              // Project sections for kanban
     workspace_users: Vec<User>,          // Users for assignment dropdowns
     task_stories: Vec<Story>,            // Comments for current task
     view_mode: ViewMode,                 // List or Kanban view
     #[allow(dead_code)]
-    edit_mode: bool,                     // Whether in edit mode
+    edit_mode: bool, // Whether in edit mode
     edit_form_state: Option<EditFormState>, // Current form field being edited
     field_editing_mode: bool,            // Whether actively editing a field (vs navigating)
     kanban_column_index: usize,          // Current column in kanban view
     kanban_task_index: usize,            // Current task index in selected column
     #[allow(dead_code)]
-    kanban_horizontal_scroll: usize,     // Horizontal scroll offset for kanban columns
+    kanban_horizontal_scroll: usize, // Horizontal scroll offset for kanban columns
     comment_input_mode: bool,            // Whether in comment input mode
     comment_input_text: String,          // Current comment text being typed
     #[allow(dead_code)]
-    comments_scroll_offset: usize,       // Scroll offset for comments list
+    comments_scroll_offset: usize, // Scroll offset for comments list
     details_scroll_offset: usize,        // Scroll offset for details panel
     notes_scroll_offset: usize,          // Scroll offset for notes panel
     current_task_panel: TaskDetailPanel, // Current panel in task detail view
@@ -181,7 +174,7 @@ pub struct State {
     access_token_input: String, // Input field for welcome screen
     has_access_token: bool,    // Whether access token exists (user is logged in)
     auth_error: Option<String>, // Error message if authentication fails
-    theme: crate::ui::Theme,    // Current theme
+    theme: crate::ui::Theme,   // Current theme
 }
 
 /// Specifies which panel is being searched.
@@ -304,7 +297,7 @@ impl State {
             ..State::default()
         }
     }
-    
+
     /// Get the current theme.
     ///
     pub fn get_theme(&self) -> &crate::ui::Theme {
@@ -513,21 +506,7 @@ impl State {
 
         let shortcut = &all_shortcuts[selected_index];
 
-        // Check if it's a static shortcut (these are now at the end after starred projects)
         match shortcut.as_str() {
-            "My Tasks" => {
-                self.tasks.clear();
-                self.dispatch(NetworkEvent::MyTasks);
-                self.view_stack.push(View::MyTasks);
-            }
-            "Recently Modified" => {
-                self.tasks.clear();
-                self.view_stack.push(View::RecentlyModified);
-            }
-            "Recently Completed" => {
-                self.tasks.clear();
-                self.view_stack.push(View::RecentlyCompleted);
-            }
             _ => {
                 // It's a starred project
                 if let Some(project) = self.projects.iter().find(|p| p.name == shortcut.as_str()) {
@@ -639,12 +618,6 @@ impl State {
     ///
     pub fn view_stack_len(&self) -> usize {
         self.view_stack.len()
-    }
-
-    /// Return the list of tasks.
-    ///
-    pub fn get_tasks(&self) -> &Vec<Task> {
-        &self.tasks
     }
 
     /// Set the list of tasks.
@@ -1348,7 +1321,10 @@ impl State {
         self.theme_selector_open = true;
         // Initialize dropdown index to current theme
         let available_themes = crate::ui::Theme::available_themes();
-        if let Some(current_index) = available_themes.iter().position(|name| name == &self.theme.name) {
+        if let Some(current_index) = available_themes
+            .iter()
+            .position(|name| name == &self.theme.name)
+        {
             self.theme_dropdown_index = current_index;
         } else {
             self.theme_dropdown_index = 0;
@@ -2451,10 +2427,6 @@ impl State {
 
                 // Check if it's a base shortcut - these cannot be removed
                 match shortcut_name.as_str() {
-                    "My Tasks" | "Recently Modified" | "Recently Completed" => {
-                        // Base shortcuts cannot be removed
-                        return self;
-                    }
                     _ => {
                         // It's a starred project - find it and unstar it
                         // First find the GID, then remove it (to avoid borrowing conflicts)
@@ -3083,7 +3055,7 @@ mod tests {
     #[test]
     fn select_status_menu() {
         let mut state = State {
-            view_stack: vec![View::MyTasks],
+            view_stack: vec![View::Welcome],
             ..State::default()
         };
         state.select_status_menu();
@@ -3135,11 +3107,9 @@ mod tests {
             ..State::default()
         };
         state.select_current_shortcut_index();
-        assert_eq!(*state.view_stack.last().unwrap(), View::MyTasks);
         assert_eq!(state.current_focus, Focus::View);
         state.current_shortcut_index = 1;
         state.select_current_shortcut_index();
-        assert_eq!(*state.view_stack.last().unwrap(), View::RecentlyModified);
         assert_eq!(state.current_focus, Focus::View);
     }
 
@@ -3202,13 +3172,11 @@ mod tests {
 
     #[test]
     fn current_view() {
-        let mut state = State {
-            view_stack: vec![View::MyTasks],
+        let state = State {
+            view_stack: vec![View::Welcome],
             ..State::default()
         };
-        assert_eq!(*state.current_view(), View::MyTasks);
-        state.view_stack = vec![View::RecentlyCompleted];
-        assert_eq!(*state.current_view(), View::RecentlyCompleted);
+        assert_eq!(*state.current_view(), View::Welcome);
     }
 
     #[test]

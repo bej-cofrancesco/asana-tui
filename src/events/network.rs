@@ -1,6 +1,6 @@
 use crate::asana::Asana;
 use crate::state::State;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use log::*;
 use regex::Regex;
 use std::collections::HashMap;
@@ -16,7 +16,6 @@ pub enum Event {
     },
     Me,
     ProjectTasks,
-    MyTasks,
     UpdateTask {
         gid: String,
         completed: Option<bool>,
@@ -152,7 +151,6 @@ impl<'a> Handler<'a> {
             }
             Event::Me => self.me().await?,
             Event::ProjectTasks => self.project_tasks().await?,
-            Event::MyTasks => self.my_tasks().await?,
             Event::UpdateTask { gid, completed } => self.update_task(gid, completed).await?,
             Event::DeleteTask { gid } => self.delete_task(gid).await?,
             Event::RefreshTasks => self.refresh_tasks().await?,
@@ -176,8 +174,16 @@ impl<'a> Handler<'a> {
                 section,
                 custom_fields,
             } => {
-                self.create_task(project_gid, name, notes, assignee, due_on, section, custom_fields)
-                    .await?
+                self.create_task(
+                    project_gid,
+                    name,
+                    notes,
+                    assignee,
+                    due_on,
+                    section,
+                    custom_fields,
+                )
+                .await?
             }
             Event::UpdateTaskFields {
                 gid,
@@ -189,8 +195,17 @@ impl<'a> Handler<'a> {
                 completed,
                 custom_fields,
             } => {
-                self.update_task_fields(gid, name, notes, assignee, due_on, section, completed, custom_fields)
-                    .await?
+                self.update_task_fields(
+                    gid,
+                    name,
+                    notes,
+                    assignee,
+                    due_on,
+                    section,
+                    completed,
+                    custom_fields,
+                )
+                .await?
             }
             Event::MoveTaskToSection {
                 task_gid,
@@ -288,36 +303,6 @@ impl<'a> Handler<'a> {
 
     /// Update state with tasks assigned to the user.
     ///
-    async fn my_tasks(&mut self) -> Result<()> {
-        info!("Fetching incomplete tasks assigned to user...");
-        let user_gid;
-        let workspace_gid;
-        {
-            let state = self.state.lock().await;
-            user_gid = state
-                .get_user()
-                .ok_or(anyhow!(
-                    "User not set. Please wait for authentication to complete."
-                ))?
-                .gid
-                .to_owned();
-            workspace_gid = state
-                .get_active_workspace()
-                .ok_or(anyhow!(
-                    "No active workspace. Please wait for authentication to complete."
-                ))?
-                .gid
-                .to_owned();
-        }
-        let my_tasks = self.asana.my_tasks(&user_gid, &workspace_gid).await?;
-        let mut state = self.state.lock().await;
-        state.set_tasks(my_tasks);
-        info!("Received incomplete tasks assigned to user.");
-        Ok(())
-    }
-
-    /// Update a task (e.g., mark as complete/incomplete).
-    ///
     async fn update_task(&mut self, task_gid: String, completed: Option<bool>) -> Result<()> {
         self.asana.update_task(&task_gid, completed).await?;
         info!("Task {} updated successfully.", task_gid);
@@ -328,9 +313,6 @@ impl<'a> Handler<'a> {
             view = state.current_view().clone();
         }
         match view {
-            crate::state::View::MyTasks => {
-                self.my_tasks().await?;
-            }
             crate::state::View::ProjectTasks => {
                 self.project_tasks().await?;
             }
@@ -352,9 +334,6 @@ impl<'a> Handler<'a> {
             view = state.current_view().clone();
         }
         match view {
-            crate::state::View::MyTasks => {
-                self.my_tasks().await?;
-            }
             crate::state::View::ProjectTasks => {
                 self.project_tasks().await?;
             }
@@ -372,9 +351,6 @@ impl<'a> Handler<'a> {
             view = state.current_view().clone();
         }
         match view {
-            crate::state::View::MyTasks => {
-                self.my_tasks().await?;
-            }
             crate::state::View::ProjectTasks => {
                 self.project_tasks().await?;
             }
@@ -414,7 +390,7 @@ impl<'a> Handler<'a> {
         let mut state = self.state.lock().await;
         state.set_task_detail(task);
         drop(state);
-        
+
         // Fetch assignees, sections, and custom fields on the fly
         if let Some(workspace_gid) = workspace_gid {
             self.get_workspace_users(workspace_gid).await?;
@@ -423,7 +399,7 @@ impl<'a> Handler<'a> {
             self.get_project_sections(project_gid.clone()).await?;
             self.get_project_custom_fields(project_gid).await?;
         }
-        
+
         // Also load stories/comments (which will also be processed)
         self.get_task_stories(task_gid_clone).await?;
         info!("Task details loaded successfully.");
@@ -445,10 +421,7 @@ impl<'a> Handler<'a> {
     ///
     async fn get_project_custom_fields(&mut self, project_gid: String) -> Result<()> {
         info!("Fetching custom fields for project {}...", project_gid);
-        let custom_fields = self
-            .asana
-            .get_project_custom_fields(&project_gid)
-            .await?;
+        let custom_fields = self.asana.get_project_custom_fields(&project_gid).await?;
 
         {
             let mut state = self.state.lock().await;

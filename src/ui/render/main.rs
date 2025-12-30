@@ -1,13 +1,7 @@
 use super::welcome;
-use super::{create_task, edit_task, kanban, task_detail, Frame};
-use super::widgets::spinner;
-use crate::state::{Focus, State, View};
-use crate::ui::widgets::styling;
-use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    text::Span,
-    widgets::{Block, Borders},
-};
+use super::{Frame, create_task, edit_task, kanban, task_detail};
+use crate::state::{State, View};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Render main widget according to state.
 ///
@@ -15,45 +9,6 @@ pub fn main(frame: &mut Frame, size: Rect, state: &mut State) {
     match state.current_view() {
         View::Welcome => {
             welcome(frame, size, state);
-        }
-        View::MyTasks => {
-            my_tasks(frame, size, state);
-
-            // Check if we need to show delete confirmation dialog (render on top)
-            if state.has_delete_confirmation() {
-                let task_name = state
-                    .get_filtered_tasks()
-                    .get(state.get_tasks_list_state().selected().unwrap_or(0))
-                    .map(|t| t.name.clone())
-                    .unwrap_or_else(|| "this task".to_string());
-                render_delete_confirmation(frame, size, &task_name, state);
-            }
-        }
-        View::RecentlyModified => {
-            recently_modified(frame, size, state);
-
-            // Check if we need to show delete confirmation dialog (render on top)
-            if state.has_delete_confirmation() {
-                let task_name = state
-                    .get_filtered_tasks()
-                    .get(state.get_tasks_list_state().selected().unwrap_or(0))
-                    .map(|t| t.name.clone())
-                    .unwrap_or_else(|| "this task".to_string());
-                render_delete_confirmation(frame, size, &task_name, state);
-            }
-        }
-        View::RecentlyCompleted => {
-            recently_completed(frame, size, state);
-
-            // Check if we need to show delete confirmation dialog (render on top)
-            if state.has_delete_confirmation() {
-                let task_name = state
-                    .get_filtered_tasks()
-                    .get(state.get_tasks_list_state().selected().unwrap_or(0))
-                    .map(|t| t.name.clone())
-                    .unwrap_or_else(|| "this task".to_string());
-                render_delete_confirmation(frame, size, &task_name, state);
-            }
         }
         View::ProjectTasks => {
             // Always show kanban view first (so modal appears on top)
@@ -116,85 +71,6 @@ fn welcome(frame: &mut Frame, size: Rect, state: &mut State) {
     welcome::render_welcome(frame, size, state);
 }
 
-fn my_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
-    let block = view_block("My Tasks", state);
-    let tasks = state.get_filtered_tasks().to_vec();
-
-    // Check if we have a search query and tasks are empty - show "No results" instead of "Loading..."
-    let has_search_query = !state.get_search_query().is_empty()
-        && matches!(
-            state.get_search_target(),
-            Some(crate::state::SearchTarget::Tasks)
-        );
-    let has_loaded_tasks = !state.get_tasks().is_empty(); // We have some tasks loaded (even if filtered out)
-
-    if tasks.is_empty() && !has_search_query && !has_loaded_tasks {
-        // Show spinner while loading
-        frame.render_widget(spinner::widget(state, size.height).block(block), size);
-    } else {
-        let list = if tasks.is_empty() && has_search_query && has_loaded_tasks {
-            // Empty search results - show "No results found"
-            ratatui::widgets::List::new(vec![ratatui::widgets::ListItem::new("No results found")])
-                .block(block)
-        } else {
-            let theme = state.get_theme().clone();
-            let list_state = state.get_tasks_list_state();
-            let list = task_list(&tasks, &theme).block(block);
-            frame.render_stateful_widget(list, size, list_state);
-            return;
-        };
-        let list_state = state.get_tasks_list_state();
-        frame.render_stateful_widget(list, size, list_state);
-    }
-}
-
-fn recently_modified(frame: &mut Frame, size: Rect, state: &mut State) {
-    let block = view_block("Recently Modified", state);
-    let tasks = state.get_filtered_tasks().to_vec();
-    let theme = state.get_theme().clone();
-    let list_state = state.get_tasks_list_state();
-    let list = task_list(&tasks, &theme).block(block);
-    frame.render_stateful_widget(list, size, list_state);
-}
-
-fn recently_completed(frame: &mut Frame, size: Rect, state: &mut State) {
-    let block = view_block("Recently Completed", state);
-    let tasks = state.get_filtered_tasks().to_vec();
-    if tasks.is_empty() && state.get_tasks().is_empty() {
-        frame.render_widget(spinner::widget(state, size.height).block(block), size);
-    } else {
-        let theme = state.get_theme().clone();
-        let list_state = state.get_tasks_list_state();
-        let list = task_list(&tasks, &theme).block(block);
-        frame.render_stateful_widget(list, size, list_state);
-    }
-}
-
-fn task_list<'a>(tasks: &'a [crate::asana::Task], theme: &'a crate::ui::Theme) -> ratatui::widgets::List<'a> {
-    if tasks.is_empty() {
-        return ratatui::widgets::List::new(vec![ratatui::widgets::ListItem::new("Loading...")]);
-    }
-    let items: Vec<ratatui::widgets::ListItem> = tasks
-        .iter()
-        .map(|t| ratatui::widgets::ListItem::new(t.name.to_owned()))
-        .collect();
-    ratatui::widgets::List::new(items)
-        .block(ratatui::widgets::Block::default().borders(ratatui::widgets::Borders::NONE))
-        .style(styling::normal_text_style(theme))
-        .highlight_style(styling::active_list_item_style(theme))
-}
-
-fn view_block<'a>(title: &'a str, state: &mut State) -> Block<'a> {
-    let theme = state.get_theme();
-    Block::default()
-        .borders(Borders::ALL)
-        .border_style(match *state.current_focus() {
-            Focus::View => styling::active_block_border_style(theme),
-            _ => styling::normal_block_border_style(theme),
-        })
-        .title(Span::styled(title, styling::active_block_title_style()))
-}
-
 fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str, state: &State) {
     use ratatui::{
         layout::Alignment,
@@ -245,9 +121,15 @@ fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str, st
                 .borders(Borders::ALL)
                 .title(Span::styled(
                     "⚠️  Confirm Delete",
-                    Style::default().fg(theme.error.to_color()).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme.error.to_color())
+                        .add_modifier(Modifier::BOLD),
                 ))
-                .border_style(Style::default().fg(theme.error.to_color()).add_modifier(Modifier::BOLD)),
+                .border_style(
+                    Style::default()
+                        .fg(theme.error.to_color())
+                        .add_modifier(Modifier::BOLD),
+                ),
         )
         .alignment(Alignment::Center)
         .wrap(Wrap { trim: true });
@@ -426,19 +308,21 @@ fn render_theme_selector_modal(frame: &mut Frame, size: Rect, state: &State) {
                         let mut chars = word.chars();
                         match chars.next() {
                             None => String::new(),
-                            Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                            Some(first) => {
+                                first.to_uppercase().collect::<String>() + chars.as_str()
+                            }
                         }
                     })
                     .collect::<Vec<_>>()
                     .join(" ");
-                
+
                 // Show indicator if this is the current theme
                 let current_indicator = if theme_name == &state.get_theme().name {
                     " (current)"
                 } else {
                     ""
                 };
-                
+
                 ListItem::new(format!("{}{}", display_name, current_indicator))
             })
             .collect()

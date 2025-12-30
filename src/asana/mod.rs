@@ -215,58 +215,6 @@ impl Asana {
             .collect())
     }
 
-    /// Returns a vector of incomplete tasks assigned to the user.
-    ///
-    pub async fn my_tasks(&mut self, user_gid: &str, workspace_gid: &str) -> Result<Vec<Task>> {
-        debug!(
-            "Requesting tasks for user GID {} and workspace GID {} (with pagination)...",
-            user_gid, workspace_gid
-        );
-
-        model!(TaskModel "tasks" { name: String, completed: bool });
-
-        // Use pagination to handle large result sets
-        let data: Vec<TaskModel> = self
-            .client
-            .list_paginated::<TaskModel>(
-                Some(vec![
-                    ("assignee", user_gid),
-                    ("workspace", workspace_gid),
-                    (
-                        "completed_since",
-                        &Utc::now().format("%Y-%m-%dT%H:%M:%S%.fZ").to_string(),
-                    ),
-                ]),
-                Some(100),
-            )
-            .await?;
-
-        debug!("Retrieved {} tasks for user GID {}", data.len(), user_gid);
-
-        Ok(data
-            .into_iter()
-            .map(|t| Task {
-                gid: t.gid,
-                name: t.name,
-                completed: t.completed,
-                notes: None,
-                assignee: None,
-                due_date: None,
-                due_on: None,
-                start_on: None,
-                section: None,
-                tags: vec![],
-                custom_fields: vec![],
-                created_at: None,
-                modified_at: None,
-                num_subtasks: 0,
-                num_comments: 0,
-            })
-            .collect())
-    }
-
-    /// Parse custom fields from task data JSON.
-    ///
     fn parse_custom_fields_from_task_data(
         extra: &std::collections::HashMap<String, serde_json::Value>,
     ) -> Vec<CustomField> {
@@ -710,7 +658,10 @@ impl Asana {
 
         // Use GET /projects/{project_gid}/custom_field_settings
         // Then fetch each custom field definition
-        let uri = format!("projects/{}/custom_field_settings?opt_fields=custom_field.gid,custom_field.name,custom_field.resource_subtype,custom_field.representation_type,custom_field.id_prefix,custom_field.enum_options.gid,custom_field.enum_options.name,custom_field.enum_options.enabled,custom_field.enum_options.color", project_gid);
+        let uri = format!(
+            "projects/{}/custom_field_settings?opt_fields=custom_field.gid,custom_field.name,custom_field.resource_subtype,custom_field.representation_type,custom_field.id_prefix,custom_field.enum_options.gid,custom_field.enum_options.name,custom_field.enum_options.enabled,custom_field.enum_options.color",
+            project_gid
+        );
         let request_url = format!("{}/{}", "https://app.asana.com/api/1.0", uri);
 
         let response = self
@@ -1194,7 +1145,10 @@ impl Asana {
                     if let Some(enum_gid_str) = cf_val.as_str() {
                         // This is an enum field - validate the enum GID
                         if enum_gid_str == "0" || enum_gid_str.is_empty() {
-                            error!("ERROR: Attempted to add custom field with invalid enum GID '{}' - skipping!", enum_gid_str);
+                            error!(
+                                "ERROR: Attempted to add custom field with invalid enum GID '{}' - skipping!",
+                                enum_gid_str
+                            );
                             should_skip = true;
                         }
                     }
@@ -1205,7 +1159,10 @@ impl Asana {
                             for item in arr {
                                 if let Some(gid_str) = item.as_str() {
                                     if gid_str == "0" || gid_str.is_empty() {
-                                        error!("ERROR: Attempted to add custom field with invalid GID '{}' in array - skipping entire field!", gid_str);
+                                        error!(
+                                            "ERROR: Attempted to add custom field with invalid GID '{}' in array - skipping entire field!",
+                                            gid_str
+                                        );
                                         should_skip = true;
                                         break;
                                     }
@@ -1895,7 +1852,6 @@ mod tests {
         let mut asana = Asana {
             client: Client::new(&token.to_string(), &server.base_url()),
         };
-        asana.my_tasks(&user.gid, &workspace.gid).await?;
         mock.assert_async().await;
         Ok(())
     }

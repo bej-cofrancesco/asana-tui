@@ -8,19 +8,14 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-pub const BANNER: &str = r"
-         _                  _            _                   _             _                  _      _                   _     
-        / /\               / /\         / /\                /\ \     _    / /\               /\ \   /\_\                /\ \   
-       / /  \             / /  \       / /  \              /  \ \   /\_\ / /  \              \_\ \ / / /         _      \ \ \  
-      / / /\ \           / / /\ \__   / / /\ \            / /\ \ \_/ / // / /\ \             /\__ \\ \ \__      /\_\    /\ \_\ 
-     / / /\ \ \         / / /\ \___\ / / /\ \ \          / / /\ \___/ // / /\ \ \           / /_ \ \\ \___\    / / /   / /\/_/ 
-    / / /  \ \ \        \ \ \ \/___// / /  \ \ \        / / /  \/____// / /  \ \ \         / / /\ \ \\__  /   / / /   / / /    
-   / / /___/ /\ \        \ \ \     / / /___/ /\ \      / / /    / / // / /___/ /\ \       / / /  \/_// / /   / / /   / / /     
-  / / /_____/ /\ \   _    \ \ \   / / /_____/ /\ \    / / /    / / // / /_____/ /\ \     / / /      / / /   / / /   / / /      
- / /_________/\ \ \ /_/\__/ / /  / /_________/\ \ \  / / /    / / // /_________/\ \ \   / / /      / / /___/ / /___/ / /__     
-/ / /_       __\ \_\\ \/___/ /  / / /_       __\ \_\/ / /    / / // / /_       __\ \_\ /_/ /      / / /____\/ //\__\/_/___\    
-\_\___\     /____/_/ \_____\/   \_\___\     /____/_/\/_/     \/_/ \_\___\     /____/_/ \_\/       \/_________/ \/_________/    
-";
+pub const BANNER: &str = r#"
+  ___                          _____ _   _ _____ 
+ / _ \                        |_   _| | | |_   _|
+/ /_\ \___  __ _ _ __   __ _    | | | | | | | |  
+|  _  / __|/ _` | '_ \ / _` |   | | | | | | | |  
+| | | \__ \ (_| | | | | (_| |   | | | |_| |_| |_ 
+\_| |_/___/\__,_|_| |_|\__,_|   \_/  \___/ \___/                                            
+"#;
 
 pub const CONTENT: &str = "
   why use asana when you can use the tui?
@@ -45,12 +40,9 @@ Enter your Personal Access Token:
 "#;
 
 pub fn render_welcome(frame: &mut Frame, size: Rect, state: &State) {
-    // Check if we have an access token (user is logged in)
     if state.has_access_token() {
-        // Show logged-in welcome screen (original design)
         render_logged_in_welcome(frame, size, state);
     } else {
-        // Show onboarding screen (no token)
         render_onboarding(frame, size, state);
     }
 }
