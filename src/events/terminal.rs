@@ -175,6 +175,209 @@ impl Handler {
                                         _ => {}
                                     }
                                 }
+                                Some(crate::state::EditFormState::CustomField(idx)) => {
+                                    // Handle custom field editing based on field type
+                                    // Clone custom field data to avoid borrow checker issues
+                                    let (cf_gid, cf_subtype) = if let Some((_, cf)) = state.get_current_custom_field() {
+                                        (cf.gid.clone(), cf.resource_subtype.clone())
+                                    } else {
+                                        return Ok(true);
+                                    };
+                                    
+                                    match cf_subtype.as_str() {
+                                            "text" | "number" | "date" => {
+                                                // Simple text input for text, number, and date fields
+                                                if let KeyEvent {
+                                                    code: KeyCode::Char(c),
+                                                    ..
+                                                } = event
+                                                {
+                                                    state.add_custom_field_text_char(cf_gid.clone(), c);
+                                                } else if matches!(event.code, KeyCode::Backspace) {
+                                                    state.remove_custom_field_text_char(&cf_gid);
+                                                }
+                                            }
+                                            "enum" => {
+                                                // Handle enum dropdown navigation and search
+                                                // Get custom field data first
+                                                let (enum_options, search) = if let Some((_, cf)) = state.get_current_custom_field() {
+                                                    (cf.enum_options.clone(), state.get_custom_field_search(&cf_gid).to_string())
+                                                } else {
+                                                    return Ok(true);
+                                                };
+                                                
+                                                match event {
+                                                    KeyEvent {
+                                                        code: KeyCode::Char(c),
+                                                        ..
+                                                    } => {
+                                                        // j/k add to search, don't navigate
+                                                        state.add_custom_field_search_char(cf_gid.clone(), c);
+                                                    }
+                                                    KeyEvent {
+                                                        code: KeyCode::Backspace,
+                                                        ..
+                                                    } => {
+                                                        state.backspace_custom_field_search(&cf_gid);
+                                                    }
+                                                    KeyEvent {
+                                                        code: KeyCode::Down,
+                                                        ..
+                                                    } => {
+                                                        let filtered_count = enum_options
+                                                            .iter()
+                                                            .filter(|eo| eo.enabled && (search.is_empty() || eo.name.to_lowercase().contains(&search.to_lowercase())))
+                                                            .count();
+                                                        state.next_custom_field_enum(&cf_gid, filtered_count);
+                                                    }
+                                                    KeyEvent {
+                                                        code: KeyCode::Up,
+                                                        ..
+                                                    } => {
+                                                        let filtered_count = enum_options
+                                                            .iter()
+                                                            .filter(|eo| eo.enabled && (search.is_empty() || eo.name.to_lowercase().contains(&search.to_lowercase())))
+                                                            .count();
+                                                        state.previous_custom_field_enum(&cf_gid, filtered_count);
+                                                    }
+                                                    KeyEvent {
+                                                        code: KeyCode::Enter,
+                                                        ..
+                                                    } => {
+                                                        // Select current enum option
+                                                        let filtered: Vec<_> = enum_options
+                                                            .iter()
+                                                            .filter(|eo| eo.enabled && (search.is_empty() || eo.name.to_lowercase().contains(&search.to_lowercase())))
+                                                            .collect();
+                                                        let current_idx = state.get_custom_field_dropdown_index(&cf_gid);
+                                                        if let Some(selected) = filtered.get(current_idx.min(filtered.len().saturating_sub(1))) {
+                                                            state.select_custom_field_enum(cf_gid.clone(), selected.gid.clone());
+                                                            state.exit_field_editing_mode();
+                                                        }
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                            "multi_enum" => {
+                                                // Handle multi-enum dropdown navigation and search
+                                                let (enum_options, search) = if let Some((_, cf)) = state.get_current_custom_field() {
+                                                    (cf.enum_options.clone(), state.get_custom_field_search(&cf_gid).to_string())
+                                                } else {
+                                                    return Ok(true);
+                                                };
+                                                
+                                                match event {
+                                                    KeyEvent {
+                                                        code: KeyCode::Char(c),
+                                                        ..
+                                                    } => {
+                                                        // j/k add to search, don't navigate
+                                                        state.add_custom_field_search_char(cf_gid.clone(), c);
+                                                    }
+                                                    KeyEvent {
+                                                        code: KeyCode::Backspace,
+                                                        ..
+                                                    } => {
+                                                        state.backspace_custom_field_search(&cf_gid);
+                                                    }
+                                                    KeyEvent {
+                                                        code: KeyCode::Down,
+                                                        ..
+                                                    } => {
+                                                        let filtered_count = enum_options
+                                                            .iter()
+                                                            .filter(|eo| eo.enabled && (search.is_empty() || eo.name.to_lowercase().contains(&search.to_lowercase())))
+                                                            .count();
+                                                        state.next_custom_field_enum(&cf_gid, filtered_count);
+                                                    }
+                                                    KeyEvent {
+                                                        code: KeyCode::Up,
+                                                        ..
+                                                    } => {
+                                                        let filtered_count = enum_options
+                                                            .iter()
+                                                            .filter(|eo| eo.enabled && (search.is_empty() || eo.name.to_lowercase().contains(&search.to_lowercase())))
+                                                            .count();
+                                                        state.previous_custom_field_enum(&cf_gid, filtered_count);
+                                                    }
+                                                    KeyEvent {
+                                                        code: KeyCode::Enter,
+                                                        ..
+                                                    } => {
+                                                        // Toggle current enum option
+                                                        let filtered: Vec<_> = enum_options
+                                                            .iter()
+                                                            .filter(|eo| eo.enabled && (search.is_empty() || eo.name.to_lowercase().contains(&search.to_lowercase())))
+                                                            .collect();
+                                                        let current_idx = state.get_custom_field_dropdown_index(&cf_gid);
+                                                        if let Some(selected) = filtered.get(current_idx.min(filtered.len().saturating_sub(1))) {
+                                                            state.toggle_custom_field_multi_enum(&cf_gid, selected.gid.clone());
+                                                        }
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                            "people" => {
+                                                // Handle people dropdown navigation and search
+                                                let (users, search) = {
+                                                    let users = state.get_workspace_users();
+                                                    (users.to_vec(), state.get_custom_field_search(&cf_gid).to_string())
+                                                };
+                                                
+                                                match event {
+                                                    KeyEvent {
+                                                        code: KeyCode::Char(c),
+                                                        ..
+                                                    } => {
+                                                        // j/k add to search, don't navigate
+                                                        state.add_custom_field_search_char(cf_gid.clone(), c);
+                                                    }
+                                                    KeyEvent {
+                                                        code: KeyCode::Backspace,
+                                                        ..
+                                                    } => {
+                                                        state.backspace_custom_field_search(&cf_gid);
+                                                    }
+                                                    KeyEvent {
+                                                        code: KeyCode::Down,
+                                                        ..
+                                                    } => {
+                                                        let filtered_count = users
+                                                            .iter()
+                                                            .filter(|u| search.is_empty() || u.name.to_lowercase().contains(&search.to_lowercase()))
+                                                            .count();
+                                                        state.next_custom_field_enum(&cf_gid, filtered_count);
+                                                    }
+                                                    KeyEvent {
+                                                        code: KeyCode::Up,
+                                                        ..
+                                                    } => {
+                                                        let filtered_count = users
+                                                            .iter()
+                                                            .filter(|u| search.is_empty() || u.name.to_lowercase().contains(&search.to_lowercase()))
+                                                            .count();
+                                                        state.previous_custom_field_enum(&cf_gid, filtered_count);
+                                                    }
+                                                    KeyEvent {
+                                                        code: KeyCode::Enter,
+                                                        ..
+                                                    } => {
+                                                        // Toggle current person
+                                                        let filtered: Vec<_> = users
+                                                            .iter()
+                                                            .filter(|u| search.is_empty() || u.name.to_lowercase().contains(&search.to_lowercase()))
+                                                            .collect();
+                                                        let current_idx = state.get_custom_field_dropdown_index(&cf_gid);
+                                                        if let Some(selected) = filtered.get(current_idx.min(filtered.len().saturating_sub(1))) {
+                                                            state.toggle_custom_field_people(&cf_gid, selected.gid.clone());
+                                                        }
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                }
                                 None => {}
                             }
                             return Ok(true);
@@ -216,6 +419,7 @@ impl Handler {
                     ) && !state.is_field_editing_mode() =>
                     {
                         // Navigate to next field
+                        let custom_fields = state.get_project_custom_fields();
                         let next_state = match state.get_edit_form_state() {
                             Some(crate::state::EditFormState::Name) => {
                                 crate::state::EditFormState::Notes
@@ -230,7 +434,18 @@ impl Handler {
                                 crate::state::EditFormState::Section
                             }
                             Some(crate::state::EditFormState::Section) => {
-                                crate::state::EditFormState::Name
+                                if !custom_fields.is_empty() {
+                                    crate::state::EditFormState::CustomField(0)
+                                } else {
+                                    crate::state::EditFormState::Name
+                                }
+                            }
+                            Some(crate::state::EditFormState::CustomField(idx)) => {
+                                if idx + 1 < custom_fields.len() {
+                                    crate::state::EditFormState::CustomField(idx + 1)
+                                } else {
+                                    crate::state::EditFormState::Name
+                                }
                             }
                             None => crate::state::EditFormState::Name,
                         };
@@ -252,9 +467,16 @@ impl Handler {
                     ) && !state.is_field_editing_mode() =>
                     {
                         // Navigate to previous field
+                        let custom_fields = state.get_project_custom_fields();
                         let prev_state = match state.get_edit_form_state() {
                             Some(crate::state::EditFormState::Name) => {
-                                crate::state::EditFormState::Section
+                                if !custom_fields.is_empty() {
+                                    crate::state::EditFormState::CustomField(
+                                        custom_fields.len() - 1,
+                                    )
+                                } else {
+                                    crate::state::EditFormState::Section
+                                }
                             }
                             Some(crate::state::EditFormState::Notes) => {
                                 crate::state::EditFormState::Name
@@ -267,6 +489,12 @@ impl Handler {
                             }
                             Some(crate::state::EditFormState::Section) => {
                                 crate::state::EditFormState::DueDate
+                            }
+                            Some(crate::state::EditFormState::CustomField(0)) => {
+                                crate::state::EditFormState::Section
+                            }
+                            Some(crate::state::EditFormState::CustomField(idx)) => {
+                                crate::state::EditFormState::CustomField(idx - 1)
                             }
                             None => crate::state::EditFormState::Name,
                         };
@@ -652,17 +880,23 @@ impl Handler {
                             state.current_view(),
                             crate::state::View::CreateTask | crate::state::View::EditTask
                         ) {
-                            // Handle dropdown navigation in forms
-                            match state.get_edit_form_state() {
-                                Some(crate::state::EditFormState::Assignee) => {
-                                    debug!("Processing previous assignee event '{:?}'...", event);
-                                    state.previous_assignee();
+                            // Handle form scrolling or dropdown navigation
+                            if !state.is_field_editing_mode() {
+                                // When not editing, j/k scrolls through form fields
+                                state.scroll_form_up();
+                            } else {
+                                // When editing, handle dropdown navigation
+                                match state.get_edit_form_state() {
+                                    Some(crate::state::EditFormState::Assignee) => {
+                                        debug!("Processing previous assignee event '{:?}'...", event);
+                                        state.previous_assignee();
+                                    }
+                                    Some(crate::state::EditFormState::Section) => {
+                                        debug!("Processing previous section event '{:?}'...", event);
+                                        state.previous_section();
+                                    }
+                                    _ => {}
                                 }
-                                Some(crate::state::EditFormState::Section) => {
-                                    debug!("Processing previous section event '{:?}'...", event);
-                                    state.previous_section();
-                                }
-                                _ => {}
                             }
                         } else {
                             match state.current_focus() {
@@ -879,6 +1113,9 @@ impl Handler {
                                     // Select the current section and stay in Section field
                                     // User must press 's' to submit or Esc to cancel
                                     state.select_current_section();
+                                }
+                                Some(crate::state::EditFormState::CustomField(_idx)) => {
+                                    // TODO: Handle custom field selection
                                 }
                                 None => {
                                     state.set_edit_form_state(Some(
@@ -1166,6 +1403,7 @@ impl Handler {
                                             assignee,
                                             due_on,
                                             section,
+                                            custom_fields: state.get_form_custom_field_values().clone(),
                                         });
                                         state.clear_form();
                                         state.pop_view();
@@ -1261,6 +1499,7 @@ impl Handler {
                                                 due_on: due_on_val,
                                                 section: section_val,
                                                 completed: None,
+                                                custom_fields: state.get_form_custom_field_values().clone(),
                                             },
                                         );
                                     }
@@ -1410,6 +1649,11 @@ impl Handler {
                                                     project_gid: project.gid.clone(),
                                                 },
                                             );
+                                            state.dispatch(
+                                                crate::events::network::Event::GetProjectCustomFields {
+                                                    project_gid: project.gid.clone(),
+                                                },
+                                            );
                                         }
                                         state.push_view(crate::state::View::CreateTask);
                                         state.focus_view();
@@ -1475,6 +1719,7 @@ impl Handler {
                                 state.current_view(),
                                 crate::state::View::CreateTask | crate::state::View::EditTask
                             ) {
+                                let custom_fields = state.get_project_custom_fields();
                                 let next_state = match state.get_edit_form_state() {
                                     Some(crate::state::EditFormState::Name) => {
                                         crate::state::EditFormState::Notes
@@ -1489,7 +1734,18 @@ impl Handler {
                                         crate::state::EditFormState::Section
                                     }
                                     Some(crate::state::EditFormState::Section) => {
-                                        crate::state::EditFormState::Name
+                                        if !custom_fields.is_empty() {
+                                            crate::state::EditFormState::CustomField(0)
+                                        } else {
+                                            crate::state::EditFormState::Name
+                                        }
+                                    }
+                                    Some(crate::state::EditFormState::CustomField(idx)) => {
+                                        if idx + 1 < custom_fields.len() {
+                                            crate::state::EditFormState::CustomField(idx + 1)
+                                        } else {
+                                            crate::state::EditFormState::Name
+                                        }
                                     }
                                     None => crate::state::EditFormState::Name,
                                 };
@@ -1514,9 +1770,16 @@ impl Handler {
                                 state.current_view(),
                                 crate::state::View::CreateTask | crate::state::View::EditTask
                             ) {
+                                let custom_fields = state.get_project_custom_fields();
                                 let prev_state = match state.get_edit_form_state() {
                                     Some(crate::state::EditFormState::Name) => {
-                                        crate::state::EditFormState::Section
+                                        if !custom_fields.is_empty() {
+                                            crate::state::EditFormState::CustomField(
+                                                custom_fields.len() - 1,
+                                            )
+                                        } else {
+                                            crate::state::EditFormState::Section
+                                        }
                                     }
                                     Some(crate::state::EditFormState::Notes) => {
                                         crate::state::EditFormState::Name
@@ -1529,6 +1792,12 @@ impl Handler {
                                     }
                                     Some(crate::state::EditFormState::Section) => {
                                         crate::state::EditFormState::DueDate
+                                    }
+                                    Some(crate::state::EditFormState::CustomField(0)) => {
+                                        crate::state::EditFormState::Section
+                                    }
+                                    Some(crate::state::EditFormState::CustomField(idx)) => {
+                                        crate::state::EditFormState::CustomField(idx - 1)
                                     }
                                     None => crate::state::EditFormState::Name,
                                 };

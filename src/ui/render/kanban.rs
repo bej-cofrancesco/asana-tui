@@ -17,10 +17,8 @@ pub fn kanban(frame: &mut Frame, size: Rect, state: &State) {
         let block = Block::default()
             .borders(Borders::ALL)
             .title("Kanban Board");
-        let text = Paragraph::new("No sections found. Loading...")
-            .block(block)
-            .alignment(Alignment::Center);
-        frame.render_widget(text, size);
+        use super::widgets::spinner;
+        frame.render_widget(spinner::widget(state, size.height).block(block), size);
         return;
     }
 

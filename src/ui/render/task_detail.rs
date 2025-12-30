@@ -86,10 +86,8 @@ pub fn task_detail(frame: &mut Frame, size: Rect, state: &mut State) {
     } else {
         // Loading or no task selected
         let block = Block::default().borders(Borders::ALL).title("Task Details");
-        let text = Paragraph::new("Loading task details...")
-            .block(block)
-            .alignment(Alignment::Center);
-        frame.render_widget(text, size);
+        use super::widgets::spinner;
+        frame.render_widget(spinner::widget(state, size.height).block(block), size);
     }
 }
 

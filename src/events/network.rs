@@ -32,6 +32,9 @@ pub enum Event {
     GetProjectSections {
         project_gid: String,
     },
+    GetProjectCustomFields {
+        project_gid: String,
+    },
     CreateStory {
         task_gid: String,
         text: String,
@@ -46,6 +49,7 @@ pub enum Event {
         assignee: Option<String>,
         due_on: Option<String>,
         section: Option<String>,
+        custom_fields: HashMap<String, crate::state::CustomFieldValue>,
     },
     UpdateTaskFields {
         gid: String,
@@ -55,6 +59,7 @@ pub enum Event {
         due_on: Option<String>,
         section: Option<String>,
         completed: Option<bool>,
+        custom_fields: HashMap<String, crate::state::CustomFieldValue>,
     },
     MoveTaskToSection {
         task_gid: String,
@@ -155,6 +160,9 @@ impl<'a> Handler<'a> {
             Event::GetProjectSections { project_gid } => {
                 self.get_project_sections(project_gid).await?
             }
+            Event::GetProjectCustomFields { project_gid } => {
+                self.get_project_custom_fields(project_gid).await?
+            }
             Event::CreateStory { task_gid, text } => self.create_story(task_gid, text).await?,
             Event::GetWorkspaceUsers { workspace_gid } => {
                 self.get_workspace_users(workspace_gid).await?
@@ -166,8 +174,9 @@ impl<'a> Handler<'a> {
                 assignee,
                 due_on,
                 section,
+                custom_fields,
             } => {
-                self.create_task(project_gid, name, notes, assignee, due_on, section)
+                self.create_task(project_gid, name, notes, assignee, due_on, section, custom_fields)
                     .await?
             }
             Event::UpdateTaskFields {
@@ -178,8 +187,9 @@ impl<'a> Handler<'a> {
                 due_on,
                 section,
                 completed,
+                custom_fields,
             } => {
-                self.update_task_fields(gid, name, notes, assignee, due_on, section, completed)
+                self.update_task_fields(gid, name, notes, assignee, due_on, section, completed, custom_fields)
                     .await?
             }
             Event::MoveTaskToSection {
@@ -394,9 +404,26 @@ impl<'a> Handler<'a> {
         }
 
         let task_gid_clone = task_gid.clone();
+        let (workspace_gid, project_gid) = {
+            let state = self.state.lock().await;
+            (
+                state.get_active_workspace().map(|w| w.gid.clone()),
+                state.get_project().map(|p| p.gid.clone()),
+            )
+        };
         let mut state = self.state.lock().await;
         state.set_task_detail(task);
         drop(state);
+        
+        // Fetch assignees, sections, and custom fields on the fly
+        if let Some(workspace_gid) = workspace_gid {
+            self.get_workspace_users(workspace_gid).await?;
+        }
+        if let Some(project_gid) = project_gid {
+            self.get_project_sections(project_gid.clone()).await?;
+            self.get_project_custom_fields(project_gid).await?;
+        }
+        
         // Also load stories/comments (which will also be processed)
         self.get_task_stories(task_gid_clone).await?;
         info!("Task details loaded successfully.");
@@ -411,6 +438,24 @@ impl<'a> Handler<'a> {
         let mut state = self.state.lock().await;
         state.set_sections(sections);
         info!("Sections loaded successfully.");
+        Ok(())
+    }
+
+    /// Get custom fields for a project.
+    ///
+    async fn get_project_custom_fields(&mut self, project_gid: String) -> Result<()> {
+        info!("Fetching custom fields for project {}...", project_gid);
+        let custom_fields = self
+            .asana
+            .get_project_custom_fields(&project_gid)
+            .await?;
+
+        {
+            let mut state = self.state.lock().await;
+            state.set_project_custom_fields(custom_fields);
+        }
+
+        info!("Custom fields loaded successfully.");
         Ok(())
     }
 
@@ -504,6 +549,7 @@ impl<'a> Handler<'a> {
         assignee: Option<String>,
         due_on: Option<String>,
         section: Option<String>,
+        custom_fields: HashMap<String, crate::state::CustomFieldValue>,
     ) -> Result<()> {
         info!("Creating new task '{}' in project {}...", name, project_gid);
         let task = self
@@ -515,6 +561,7 @@ impl<'a> Handler<'a> {
                 assignee.as_deref(),
                 due_on.as_deref(),
                 section.as_deref(),
+                &custom_fields,
             )
             .await?;
 
@@ -561,6 +608,7 @@ impl<'a> Handler<'a> {
         due_on: Option<String>,
         section: Option<String>,
         completed: Option<bool>,
+        custom_fields: HashMap<String, crate::state::CustomFieldValue>,
     ) -> Result<()> {
         self.asana
             .update_task_fields(
@@ -571,6 +619,7 @@ impl<'a> Handler<'a> {
                 due_on.as_deref(),
                 section.as_deref(),
                 completed,
+                &custom_fields,
             )
             .await?;
         // Refresh task detail if we're viewing it

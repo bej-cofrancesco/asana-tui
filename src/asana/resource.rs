@@ -33,6 +33,34 @@ pub struct Tag {
     pub name: String,
 }
 
+/// Defines enum option for custom fields.
+///
+#[derive(Clone, Debug, Dummy, PartialEq, Eq)]
+pub struct EnumOption {
+    pub gid: String,
+    pub name: String,
+    pub enabled: bool,
+    pub color: Option<String>,
+}
+
+/// Defines custom field data structure.
+///
+#[derive(Clone, Debug, Dummy, PartialEq)]
+pub struct CustomField {
+    pub gid: String,
+    pub name: String,
+    pub resource_subtype: String, // text, number, date, enum, multi_enum, people, reference
+    pub enum_options: Vec<EnumOption>, // For enum and multi_enum types
+    // Values (only one will be set based on resource_subtype)
+    pub text_value: Option<String>,
+    pub number_value: Option<f64>,
+    pub date_value: Option<String>,         // ISO date string
+    pub enum_value: Option<EnumOption>,     // For single enum
+    pub multi_enum_values: Vec<EnumOption>, // For multi_enum
+    pub people_value: Vec<User>,            // For people type
+    pub enabled: bool,                      // Whether the custom field is enabled on this task
+}
+
 /// Defines task data structure.
 ///
 #[derive(Clone, Debug, Dummy, PartialEq)]
@@ -47,6 +75,7 @@ pub struct Task {
     pub start_on: Option<String>,
     pub section: Option<Section>,
     pub tags: Vec<Tag>,
+    pub custom_fields: Vec<CustomField>, // Custom fields on this task
     pub created_at: Option<String>,
     pub modified_at: Option<String>,
     pub num_subtasks: usize,

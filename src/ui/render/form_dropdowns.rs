@@ -33,7 +33,7 @@ pub fn render_assignee_dropdown(frame: &mut Frame, area: Rect, state: &State) {
     // Filtered users list - limit to max 5 visible items
     let filtered_users = state.get_filtered_assignees();
     let selected_index = state.get_assignee_dropdown_index();
-    
+
     // Calculate visible range (show max 5 items, centered around selected)
     let max_visible = 5;
     let total_items = filtered_users.len();
@@ -63,7 +63,7 @@ pub fn render_assignee_dropdown(frame: &mut Frame, area: Rect, state: &State) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(
-            "Assignee ({} results, j/k to navigate, Enter to select)",
+            "Assignee ({} results, ↑ / ↓ to navigate, Enter to select)",
             filtered_users.len()
         ))
         .border_style(styling::active_block_border_style());
@@ -113,7 +113,7 @@ pub fn render_section_dropdown(frame: &mut Frame, area: Rect, state: &State) {
     // Filtered sections list - limit to max 5 visible items
     let filtered_sections = state.get_filtered_sections();
     let selected_index = state.get_section_dropdown_index();
-    
+
     // Calculate visible range (show max 5 items, centered around selected)
     let max_visible = 5;
     let total_items = filtered_sections.len();
@@ -136,7 +136,7 @@ pub fn render_section_dropdown(frame: &mut Frame, area: Rect, state: &State) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(
-            "Section ({} results, j/k to navigate, Enter to select)",
+            "Section ({} results, ↑ / ↓ to navigate, Enter to select)",
             filtered_sections.len()
         ))
         .border_style(styling::active_block_border_style());

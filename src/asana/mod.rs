@@ -205,6 +205,7 @@ impl Asana {
                     start_on: None,
                     section,
                     tags: vec![],
+                    custom_fields: vec![],
                     created_at: None,
                     modified_at: None,
                     num_subtasks: 0,
@@ -255,12 +256,208 @@ impl Asana {
                 start_on: None,
                 section: None,
                 tags: vec![],
+                custom_fields: vec![],
                 created_at: None,
                 modified_at: None,
                 num_subtasks: 0,
                 num_comments: 0,
             })
             .collect())
+    }
+
+    /// Parse custom fields from task data JSON.
+    ///
+    fn parse_custom_fields_from_task_data(
+        extra: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> Vec<CustomField> {
+        let mut custom_fields = Vec::new();
+
+        if let Some(custom_fields_array) = extra.get("custom_fields").and_then(|v| v.as_array()) {
+            for cf_val in custom_fields_array {
+                if let Some(cf_obj) = cf_val.as_object() {
+                    let gid = cf_obj
+                        .get("gid")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let name = cf_obj
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let resource_subtype = cf_obj
+                        .get("resource_subtype")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("text")
+                        .to_string();
+                    let enabled = cf_obj
+                        .get("enabled")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+
+                    // Parse enum options
+                    let mut enum_options = Vec::new();
+                    if let Some(enum_opts_array) =
+                        cf_obj.get("enum_options").and_then(|v| v.as_array())
+                    {
+                        for eo_val in enum_opts_array {
+                            if let Some(eo_obj) = eo_val.as_object() {
+                                enum_options.push(EnumOption {
+                                    gid: eo_obj
+                                        .get("gid")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    name: eo_obj
+                                        .get("name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    enabled: eo_obj
+                                        .get("enabled")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(true),
+                                    color: eo_obj
+                                        .get("color")
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.to_string()),
+                                });
+                            }
+                        }
+                    }
+
+                    // Parse values based on resource_subtype
+                    let mut text_value = None;
+                    let mut number_value = None;
+                    let mut date_value = None;
+                    let mut enum_value = None;
+                    let mut multi_enum_values = Vec::new();
+                    let mut people_value = Vec::new();
+
+                    match resource_subtype.as_str() {
+                        "text" => {
+                            text_value = cf_obj
+                                .get("text_value")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+                        }
+                        "number" => {
+                            number_value = cf_obj.get("number_value").and_then(|v| v.as_f64());
+                        }
+                        "date" => {
+                            if let Some(date_obj) =
+                                cf_obj.get("date_value").and_then(|v| v.as_object())
+                            {
+                                date_value = date_obj
+                                    .get("date")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string());
+                            }
+                        }
+                        "enum" => {
+                            if let Some(enum_obj) =
+                                cf_obj.get("enum_value").and_then(|v| v.as_object())
+                            {
+                                enum_value = Some(EnumOption {
+                                    gid: enum_obj
+                                        .get("gid")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    name: enum_obj
+                                        .get("name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    enabled: enum_obj
+                                        .get("enabled")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(true),
+                                    color: enum_obj
+                                        .get("color")
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.to_string()),
+                                });
+                            }
+                        }
+                        "multi_enum" => {
+                            if let Some(multi_enum_array) =
+                                cf_obj.get("multi_enum_values").and_then(|v| v.as_array())
+                            {
+                                for me_val in multi_enum_array {
+                                    if let Some(me_obj) = me_val.as_object() {
+                                        multi_enum_values.push(EnumOption {
+                                            gid: me_obj
+                                                .get("gid")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            name: me_obj
+                                                .get("name")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            enabled: me_obj
+                                                .get("enabled")
+                                                .and_then(|v| v.as_bool())
+                                                .unwrap_or(true),
+                                            color: me_obj
+                                                .get("color")
+                                                .and_then(|v| v.as_str())
+                                                .map(|s| s.to_string()),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        "people" => {
+                            if let Some(people_array) =
+                                cf_obj.get("people_value").and_then(|v| v.as_array())
+                            {
+                                for p_val in people_array {
+                                    if let Some(p_obj) = p_val.as_object() {
+                                        people_value.push(User {
+                                            gid: p_obj
+                                                .get("gid")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            name: p_obj
+                                                .get("name")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            email: p_obj
+                                                .get("email")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    custom_fields.push(CustomField {
+                        gid,
+                        name,
+                        resource_subtype,
+                        enum_options,
+                        text_value,
+                        number_value,
+                        date_value,
+                        enum_value,
+                        multi_enum_values,
+                        people_value,
+                        enabled,
+                    });
+                }
+            }
+        }
+
+        custom_fields
     }
 
     /// Get a single task with full details.
@@ -282,11 +479,11 @@ impl Asana {
             modified_at: Option<String>,
         });
 
-        // Request task with assignee, section, and tags as nested fields
+        // Request task with assignee, section, tags, and custom fields as nested fields
         // For GET /tasks/{task_gid}, we pass opt_fields but NO other params (no project, workspace, etc.)
         // The API returns nested objects as partial (gid + resource_type) unless we request specific fields
         // IMPORTANT: Always include resource_type in opt_fields as it's required by the model
-        let opt_fields = "resource_type,name,completed,notes,due_on,start_on,created_at,modified_at,assignee.name,assignee.email,memberships.section.name,tags.name";
+        let opt_fields = "resource_type,name,completed,notes,due_on,start_on,created_at,modified_at,assignee.name,assignee.email,memberships.section.name,tags.name,custom_fields.gid,custom_fields.name,custom_fields.resource_subtype,custom_fields.enum_options.gid,custom_fields.enum_options.name,custom_fields.enum_options.enabled,custom_fields.enum_options.color,custom_fields.text_value,custom_fields.number_value,custom_fields.date_value.date,custom_fields.enum_value.gid,custom_fields.enum_value.name,custom_fields.multi_enum_values.gid,custom_fields.multi_enum_values.name,custom_fields.people_value.gid,custom_fields.people_value.name,custom_fields.enabled";
 
         // Build URL manually to avoid client adding conflicting params
         let uri = format!("tasks/{}?opt_fields={}", task_gid, opt_fields);
@@ -406,6 +603,9 @@ impl Asana {
             }
         };
 
+        // Extract custom fields
+        let custom_fields = Self::parse_custom_fields_from_task_data(&task_data.extra);
+
         Ok(Task {
             gid: task_data.gid,
             name: task_data.name,
@@ -417,6 +617,7 @@ impl Asana {
             start_on: task_data.start_on,
             section,
             tags,
+            custom_fields,
             created_at: task_data.created_at,
             modified_at: task_data.modified_at,
             num_subtasks: subtasks.len(),
@@ -465,6 +666,7 @@ impl Asana {
             start_on: None,
             section: None,
             tags: vec![],
+            custom_fields: vec![],
             created_at: None,
             modified_at: None,
             num_subtasks: 0,
@@ -494,6 +696,116 @@ impl Asana {
                 name: s.name,
             })
             .collect())
+    }
+
+    /// Get custom fields for a project.
+    ///
+    pub async fn get_project_custom_fields(
+        &mut self,
+        project_gid: &str,
+    ) -> Result<Vec<CustomField>> {
+        debug!("Fetching custom fields for project GID {}...", project_gid);
+
+        // Use GET /projects/{project_gid}/custom_field_settings
+        // Then fetch each custom field definition
+        let uri = format!("projects/{}/custom_field_settings?opt_fields=custom_field.gid,custom_field.name,custom_field.resource_subtype,custom_field.enum_options.gid,custom_field.enum_options.name,custom_field.enum_options.enabled,custom_field.enum_options.color", project_gid);
+        let request_url = format!("{}/{}", "https://app.asana.com/api/1.0", uri);
+
+        let response = self
+            .client
+            .http_client
+            .get(&request_url)
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.client.access_token),
+            )
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let response_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| String::from("Unable to read response"));
+            warn!(
+                "Failed to fetch custom fields: {} - {}",
+                status, response_text
+            );
+            return Ok(vec![]); // Return empty vec on error (custom fields are optional)
+        }
+
+        let json: serde_json::Value = response.json().await?;
+        let mut custom_fields = Vec::new();
+
+        if let Some(data_array) = json.get("data").and_then(|v| v.as_array()) {
+            for item in data_array {
+                if let Some(cf_obj) = item.get("custom_field").and_then(|v| v.as_object()) {
+                    let gid = cf_obj
+                        .get("gid")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let name = cf_obj
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let resource_subtype = cf_obj
+                        .get("resource_subtype")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("text")
+                        .to_string();
+
+                    // Parse enum options
+                    let mut enum_options = Vec::new();
+                    if let Some(enum_opts_array) =
+                        cf_obj.get("enum_options").and_then(|v| v.as_array())
+                    {
+                        for eo_val in enum_opts_array {
+                            if let Some(eo_obj) = eo_val.as_object() {
+                                enum_options.push(EnumOption {
+                                    gid: eo_obj
+                                        .get("gid")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    name: eo_obj
+                                        .get("name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    enabled: eo_obj
+                                        .get("enabled")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(true),
+                                    color: eo_obj
+                                        .get("color")
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.to_string()),
+                                });
+                            }
+                        }
+                    }
+
+                    custom_fields.push(CustomField {
+                        gid,
+                        name,
+                        resource_subtype,
+                        enum_options,
+                        text_value: None,
+                        number_value: None,
+                        date_value: None,
+                        enum_value: None,
+                        multi_enum_values: vec![],
+                        people_value: vec![],
+                        enabled: true,
+                    });
+                }
+            }
+        }
+
+        Ok(custom_fields)
     }
 
     /// Get all stories/comments for a task.
@@ -644,6 +956,7 @@ impl Asana {
         assignee: Option<&str>,
         due_on: Option<&str>,
         section: Option<&str>,
+        custom_fields: &std::collections::HashMap<String, crate::state::CustomFieldValue>,
     ) -> Result<Task> {
         debug!("Creating new task in project GID {}...", project_gid);
 
@@ -662,6 +975,58 @@ impl Asana {
         }
         if let Some(due_on_val) = due_on {
             data["due_on"] = serde_json::Value::String(due_on_val.to_string());
+        }
+
+        // Add custom fields
+        if !custom_fields.is_empty() {
+            let mut custom_fields_array = Vec::new();
+            for (gid, value) in custom_fields {
+                let mut cf_data = serde_json::json!({
+                    "gid": gid
+                });
+                match value {
+                    crate::state::CustomFieldValue::Text(s) if !s.is_empty() => {
+                        cf_data["text_value"] = serde_json::Value::String(s.clone());
+                    }
+                    crate::state::CustomFieldValue::Number(Some(n)) => {
+                        if let Some(num) = serde_json::Number::from_f64(*n) {
+                            cf_data["number_value"] = serde_json::Value::Number(num);
+                        } else {
+                            cf_data["number_value"] =
+                                serde_json::Value::Number(serde_json::Number::from(0));
+                        }
+                    }
+                    crate::state::CustomFieldValue::Date(Some(d)) if !d.is_empty() => {
+                        cf_data["date_value"] = serde_json::json!({
+                            "date": d
+                        });
+                    }
+                    crate::state::CustomFieldValue::Enum(Some(enum_gid)) => {
+                        cf_data["enum_value"] = serde_json::json!({
+                            "gid": enum_gid
+                        });
+                    }
+                    crate::state::CustomFieldValue::MultiEnum(gids) if !gids.is_empty() => {
+                        cf_data["multi_enum_values"] = serde_json::Value::Array(
+                            gids.iter()
+                                .map(|gid| serde_json::json!({"gid": gid}))
+                                .collect(),
+                        );
+                    }
+                    crate::state::CustomFieldValue::People(gids) if !gids.is_empty() => {
+                        cf_data["people_value"] = serde_json::Value::Array(
+                            gids.iter()
+                                .map(|gid| serde_json::json!({"gid": gid}))
+                                .collect(),
+                        );
+                    }
+                    _ => continue, // Skip empty values
+                }
+                custom_fields_array.push(cf_data);
+            }
+            if !custom_fields_array.is_empty() {
+                data["custom_fields"] = serde_json::Value::Array(custom_fields_array);
+            }
         }
 
         let body = serde_json::json!({
@@ -699,6 +1064,7 @@ impl Asana {
             start_on: None,
             section: None,
             tags: vec![],
+            custom_fields: vec![],
             created_at: None,
             modified_at: None,
             num_subtasks: 0,
@@ -717,6 +1083,7 @@ impl Asana {
         due_on: Option<&str>,
         section: Option<&str>,
         completed: Option<bool>,
+        custom_fields: &std::collections::HashMap<String, crate::state::CustomFieldValue>,
     ) -> Result<Task> {
         debug!("Updating task fields for GID {}...", task_gid);
 
@@ -773,13 +1140,66 @@ impl Asana {
             data["completed"] = serde_json::Value::Bool(completed_val);
         }
 
+        // Add custom fields
+        if !custom_fields.is_empty() {
+            let mut custom_fields_array = Vec::new();
+            for (gid, value) in custom_fields {
+                let mut cf_data = serde_json::json!({
+                    "gid": gid
+                });
+                match value {
+                    crate::state::CustomFieldValue::Text(s) if !s.is_empty() => {
+                        cf_data["text_value"] = serde_json::Value::String(s.clone());
+                    }
+                    crate::state::CustomFieldValue::Number(Some(n)) => {
+                        if let Some(num) = serde_json::Number::from_f64(*n) {
+                            cf_data["number_value"] = serde_json::Value::Number(num);
+                        } else {
+                            cf_data["number_value"] =
+                                serde_json::Value::Number(serde_json::Number::from(0));
+                        }
+                    }
+                    crate::state::CustomFieldValue::Date(Some(d)) if !d.is_empty() => {
+                        cf_data["date_value"] = serde_json::json!({
+                            "date": d
+                        });
+                    }
+                    crate::state::CustomFieldValue::Enum(Some(enum_gid)) => {
+                        cf_data["enum_value"] = serde_json::json!({
+                            "gid": enum_gid
+                        });
+                    }
+                    crate::state::CustomFieldValue::MultiEnum(gids) if !gids.is_empty() => {
+                        cf_data["multi_enum_values"] = serde_json::Value::Array(
+                            gids.iter()
+                                .map(|gid| serde_json::json!({"gid": gid}))
+                                .collect(),
+                        );
+                    }
+                    crate::state::CustomFieldValue::People(gids) if !gids.is_empty() => {
+                        cf_data["people_value"] = serde_json::Value::Array(
+                            gids.iter()
+                                .map(|gid| serde_json::json!({"gid": gid}))
+                                .collect(),
+                        );
+                    }
+                    _ => continue, // Skip empty values
+                }
+                custom_fields_array.push(cf_data);
+            }
+            if !custom_fields_array.is_empty() {
+                data["custom_fields"] = serde_json::Value::Array(custom_fields_array);
+            }
+        }
+
         // If only section changed, skip the PUT request and just move the section
         let has_section_only = section.is_some()
             && name.is_none()
             && notes.is_none()
             && assignee.is_none()
             && due_on.is_none()
-            && completed.is_none();
+            && completed.is_none()
+            && custom_fields.is_empty();
 
         if has_section_only {
             // Just move the section, no PUT request needed

@@ -1,5 +1,6 @@
 use super::welcome;
 use super::{create_task, edit_task, kanban, task_detail, Frame};
+use super::widgets::spinner;
 use crate::state::{Focus, State, View};
 use crate::ui::widgets::styling;
 use ratatui::{
@@ -122,15 +123,19 @@ fn my_tasks(frame: &mut Frame, size: Rect, state: &mut State) {
         );
     let has_loaded_tasks = !state.get_tasks().is_empty(); // We have some tasks loaded (even if filtered out)
 
-    let list = if tasks.is_empty() && has_search_query && has_loaded_tasks {
-        // Empty search results - show "No results found"
-        ratatui::widgets::List::new(vec![ratatui::widgets::ListItem::new("No results found")])
-            .block(block)
+    if tasks.is_empty() && !has_search_query && !has_loaded_tasks {
+        // Show spinner while loading
+        frame.render_widget(spinner::widget(state, size.height).block(block), size);
     } else {
-        task_list(&tasks).block(block)
-    };
-
-    frame.render_stateful_widget(list, size, state.get_tasks_list_state());
+        let list = if tasks.is_empty() && has_search_query && has_loaded_tasks {
+            // Empty search results - show "No results found"
+            ratatui::widgets::List::new(vec![ratatui::widgets::ListItem::new("No results found")])
+                .block(block)
+        } else {
+            task_list(&tasks).block(block)
+        };
+        frame.render_stateful_widget(list, size, state.get_tasks_list_state());
+    }
 }
 
 fn recently_modified(frame: &mut Frame, size: Rect, state: &mut State) {
@@ -143,8 +148,12 @@ fn recently_modified(frame: &mut Frame, size: Rect, state: &mut State) {
 fn recently_completed(frame: &mut Frame, size: Rect, state: &mut State) {
     let block = view_block("Recently Completed", state);
     let tasks = state.get_filtered_tasks().to_vec();
-    let list = task_list(&tasks).block(block);
-    frame.render_stateful_widget(list, size, state.get_tasks_list_state());
+    if tasks.is_empty() && state.get_tasks().is_empty() {
+        frame.render_widget(spinner::widget(state, size.height).block(block), size);
+    } else {
+        let list = task_list(&tasks).block(block);
+        frame.render_stateful_widget(list, size, state.get_tasks_list_state());
+    }
 }
 
 fn task_list(tasks: &[crate::asana::Task]) -> ratatui::widgets::List {
@@ -155,11 +164,10 @@ fn task_list(tasks: &[crate::asana::Task]) -> ratatui::widgets::List {
         .iter()
         .map(|t| ratatui::widgets::ListItem::new(t.name.to_owned()))
         .collect();
-    let list = ratatui::widgets::List::new(items)
+    ratatui::widgets::List::new(items)
         .block(ratatui::widgets::Block::default().borders(ratatui::widgets::Borders::NONE))
         .style(styling::normal_text_style())
-        .highlight_style(styling::active_list_item_style());
-    list
+        .highlight_style(styling::active_list_item_style())
 }
 
 fn view_block<'a>(title: &'a str, state: &mut State) -> Block<'a> {
@@ -231,7 +239,7 @@ fn render_delete_confirmation(frame: &mut Frame, size: Rect, task_name: &str) {
     frame.render_widget(paragraph, popup_area);
 }
 
-fn render_move_task_modal(frame: &mut Frame, size: Rect, task_name: &str, state: &State) {
+fn render_move_task_modal(frame: &mut Frame, size: Rect, _task_name: &str, state: &State) {
     use crate::ui::widgets::styling;
     use ratatui::{
         layout::{Alignment, Constraint, Direction, Layout},
