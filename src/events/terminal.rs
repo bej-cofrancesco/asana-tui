@@ -108,6 +108,7 @@ impl Handler {
                                             code: KeyCode::Char(c),
                                             ..
                                         } => {
+                                            // j/k add to search, don't navigate
                                             state.add_assignee_search_char(c);
                                         }
                                         KeyEvent {
@@ -117,13 +118,13 @@ impl Handler {
                                             state.backspace_assignee_search();
                                         }
                                         KeyEvent {
-                                            code: KeyCode::Down | KeyCode::Char('j'),
+                                            code: KeyCode::Down,
                                             ..
                                         } => {
                                             state.next_assignee();
                                         }
                                         KeyEvent {
-                                            code: KeyCode::Up | KeyCode::Char('k'),
+                                            code: KeyCode::Up,
                                             ..
                                         } => {
                                             state.previous_assignee();
@@ -145,6 +146,7 @@ impl Handler {
                                             code: KeyCode::Char(c),
                                             ..
                                         } => {
+                                            // j/k add to search, don't navigate
                                             state.add_section_search_char(c);
                                         }
                                         KeyEvent {
@@ -154,13 +156,13 @@ impl Handler {
                                             state.backspace_section_search();
                                         }
                                         KeyEvent {
-                                            code: KeyCode::Down | KeyCode::Char('j'),
+                                            code: KeyCode::Down,
                                             ..
                                         } => {
                                             state.next_section();
                                         }
                                         KeyEvent {
-                                            code: KeyCode::Up | KeyCode::Char('k'),
+                                            code: KeyCode::Up,
                                             ..
                                         } => {
                                             state.previous_section();

@@ -63,7 +63,7 @@ pub fn render_assignee_dropdown(frame: &mut Frame, area: Rect, state: &State) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(
-            "Assignee ({} results, ↑ / ↓ to navigate, Enter to select)",
+            "Assignee ({} results, j/k to navigate, Enter to select)",
             filtered_users.len()
         ))
         .border_style(styling::active_block_border_style());
@@ -136,7 +136,7 @@ pub fn render_section_dropdown(frame: &mut Frame, area: Rect, state: &State) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(
-            "Section ({} results, ↑ / ↓ to navigate, Enter to select)",
+            "Section ({} results, j/k to navigate, Enter to select)",
             filtered_sections.len()
         ))
         .border_style(styling::active_block_border_style());

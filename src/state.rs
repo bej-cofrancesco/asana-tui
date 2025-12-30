@@ -1,12 +1,24 @@
 use crate::app::NetworkEventSender;
-use crate::asana::{Project, Section, Story, Task, User, Workspace};
+use crate::asana::{CustomField, Project, Section, Story, Task, User, Workspace};
 use crate::events::network::Event as NetworkEvent;
 use crate::ui::SPINNER_FRAME_COUNT;
 use log::*;
 use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
-use tui_textarea::{Input as TextAreaInput, Key as TextAreaKey, TextArea};
+use tui_textarea::TextArea;
+
+/// Custom field value for form editing.
+///
+#[derive(Clone, Debug, PartialEq)]
+pub enum CustomFieldValue {
+    Text(String),
+    Number(Option<f64>),
+    Date(Option<String>),
+    Enum(Option<String>),   // GID of selected enum option
+    MultiEnum(Vec<String>), // GIDs of selected enum options
+    People(Vec<String>),    // GIDs of selected users
+}
 
 /// Specifying the different foci.
 ///
@@ -58,6 +70,7 @@ pub enum EditFormState {
     Assignee,
     DueDate,
     Section,
+    CustomField(usize), // Index into custom_fields array
 }
 
 /// Specifying task filter options.
@@ -149,8 +162,14 @@ pub struct State {
     // Dropdown selection indices
     assignee_dropdown_index: usize,
     section_dropdown_index: usize,
+    // Custom fields
+    project_custom_fields: Vec<CustomField>, // Custom fields available for the current project
+    form_custom_field_values: HashMap<String, CustomFieldValue>, // GID -> value for form
+    custom_field_search: HashMap<String, String>, // GID -> search text for enum/people fields
+    custom_field_dropdown_index: HashMap<String, usize>, // GID -> dropdown index
+    form_scroll_offset: usize, // Scroll offset for form fields (how many fields to skip)
     access_token_input: String, // Input field for welcome screen
-    has_access_token: bool,     // Whether access token exists (user is logged in)
+    has_access_token: bool,    // Whether access token exists (user is logged in)
     auth_error: Option<String>, // Error message if authentication fails
 }
 
@@ -239,6 +258,11 @@ impl Default for State {
             original_form_section: None,
             assignee_dropdown_index: 0,
             section_dropdown_index: 0,
+            project_custom_fields: vec![],
+            form_custom_field_values: HashMap::new(),
+            custom_field_search: HashMap::new(),
+            custom_field_dropdown_index: HashMap::new(),
+            form_scroll_offset: 0,
             access_token_input: String::new(),
             has_access_token: false, // Default to false, will be set when token is loaded
             auth_error: None,        // No error initially
@@ -1849,11 +1873,232 @@ impl State {
         self.form_due_on.clear();
         self.form_section = None;
         self.form_section_search.clear();
+        self.form_custom_field_values.clear();
+        self.custom_field_search.clear();
+        self.custom_field_dropdown_index.clear();
         self.edit_form_state = None;
         self.field_editing_mode = false;
         self.assignee_dropdown_index = 0;
         self.section_dropdown_index = 0;
+        self.form_scroll_offset = 0;
         self
+    }
+
+    /// Get available custom fields for the current project.
+    ///
+    pub fn get_project_custom_fields(&self) -> &[CustomField] {
+        &self.project_custom_fields
+    }
+
+    /// Set project custom fields.
+    ///
+    pub fn set_project_custom_fields(&mut self, fields: Vec<CustomField>) -> &mut Self {
+        self.project_custom_fields = fields;
+        self
+    }
+
+    /// Get custom field value for a given GID.
+    ///
+    pub fn get_custom_field_value(&self, gid: &str) -> Option<&CustomFieldValue> {
+        self.form_custom_field_values.get(gid)
+    }
+
+    /// Get all custom field values (for API calls).
+    ///
+    pub fn get_form_custom_field_values(&self) -> &HashMap<String, CustomFieldValue> {
+        &self.form_custom_field_values
+    }
+
+    /// Set custom field value for a given GID.
+    ///
+    pub fn set_custom_field_value(&mut self, gid: String, value: CustomFieldValue) -> &mut Self {
+        self.form_custom_field_values.insert(gid, value);
+        self
+    }
+
+    /// Get custom field search text.
+    ///
+    pub fn get_custom_field_search(&self, gid: &str) -> &str {
+        self.custom_field_search
+            .get(gid)
+            .map(|s| s.as_str())
+            .unwrap_or("")
+    }
+
+    /// Add character to custom field search.
+    ///
+    pub fn add_custom_field_search_char(&mut self, gid: String, c: char) -> &mut Self {
+        self.custom_field_search
+            .entry(gid)
+            .or_insert_with(String::new)
+            .push(c);
+        self
+    }
+
+    /// Backspace custom field search.
+    ///
+    pub fn backspace_custom_field_search(&mut self, gid: &str) -> &mut Self {
+        if let Some(search) = self.custom_field_search.get_mut(gid) {
+            search.pop();
+        }
+        self
+    }
+
+    /// Get custom field dropdown index.
+    ///
+    pub fn get_custom_field_dropdown_index(&self, gid: &str) -> usize {
+        *self.custom_field_dropdown_index.get(gid).unwrap_or(&0)
+    }
+
+    /// Set custom field dropdown index.
+    ///
+    pub fn set_custom_field_dropdown_index(&mut self, gid: String, index: usize) -> &mut Self {
+        self.custom_field_dropdown_index.insert(gid, index);
+        self
+    }
+
+    /// Add character to custom field text value.
+    ///
+    pub fn add_custom_field_text_char(&mut self, gid: String, c: char) -> &mut Self {
+        let current = self
+            .form_custom_field_values
+            .get(&gid)
+            .and_then(|v| match v {
+                CustomFieldValue::Text(s) => Some(s.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        self.form_custom_field_values
+            .insert(gid, CustomFieldValue::Text(current + &c.to_string()));
+        self
+    }
+
+    /// Remove character from custom field text value.
+    ///
+    pub fn remove_custom_field_text_char(&mut self, gid: &str) -> &mut Self {
+        if let Some(CustomFieldValue::Text(s)) = self.form_custom_field_values.get(gid) {
+            let mut new_s = s.clone();
+            new_s.pop();
+            self.form_custom_field_values
+                .insert(gid.to_string(), CustomFieldValue::Text(new_s));
+        }
+        self
+    }
+
+    /// Get current custom field being edited.
+    ///
+    pub fn get_current_custom_field(&self) -> Option<(usize, &CustomField)> {
+        if let Some(EditFormState::CustomField(idx)) = self.edit_form_state {
+            self.project_custom_fields.get(idx).map(|cf| (idx, cf))
+        } else {
+            None
+        }
+    }
+
+    /// Navigate to next enum option in custom field dropdown.
+    ///
+    pub fn next_custom_field_enum(&mut self, gid: &str, count: usize) -> &mut Self {
+        let current = self.get_custom_field_dropdown_index(gid);
+        let new_idx = if current + 1 >= count { 0 } else { current + 1 };
+        self.set_custom_field_dropdown_index(gid.to_string(), new_idx);
+        self
+    }
+
+    /// Navigate to previous enum option in custom field dropdown.
+    ///
+    pub fn previous_custom_field_enum(&mut self, gid: &str, count: usize) -> &mut Self {
+        let current = self.get_custom_field_dropdown_index(gid);
+        let new_idx = if current == 0 {
+            count.saturating_sub(1)
+        } else {
+            current - 1
+        };
+        self.set_custom_field_dropdown_index(gid.to_string(), new_idx);
+        self
+    }
+
+    /// Select current enum option for custom field.
+    ///
+    pub fn select_custom_field_enum(&mut self, gid: String, enum_gid: String) -> &mut Self {
+        self.form_custom_field_values
+            .insert(gid, CustomFieldValue::Enum(Some(enum_gid)));
+        self
+    }
+
+    /// Toggle multi-enum option for custom field.
+    ///
+    pub fn toggle_custom_field_multi_enum(&mut self, gid: &str, enum_gid: String) -> &mut Self {
+        let current = self
+            .form_custom_field_values
+            .get(gid)
+            .and_then(|v| match v {
+                CustomFieldValue::MultiEnum(gids) => Some(gids.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+
+        let mut new_gids = current;
+        if new_gids.contains(&enum_gid) {
+            new_gids.retain(|g| g != &enum_gid);
+        } else {
+            new_gids.push(enum_gid);
+        }
+        self.form_custom_field_values
+            .insert(gid.to_string(), CustomFieldValue::MultiEnum(new_gids));
+        self
+    }
+
+    /// Toggle people option for custom field.
+    ///
+    pub fn toggle_custom_field_people(&mut self, gid: &str, user_gid: String) -> &mut Self {
+        let current = self
+            .form_custom_field_values
+            .get(gid)
+            .and_then(|v| match v {
+                CustomFieldValue::People(gids) => Some(gids.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+
+        let mut new_gids = current;
+        if new_gids.contains(&user_gid) {
+            new_gids.retain(|g| g != &user_gid);
+        } else {
+            new_gids.push(user_gid);
+        }
+        self.form_custom_field_values
+            .insert(gid.to_string(), CustomFieldValue::People(new_gids));
+        self
+    }
+
+    /// Get form scroll offset.
+    ///
+    pub fn get_form_scroll_offset(&self) -> usize {
+        self.form_scroll_offset
+    }
+
+    /// Scroll form up (show earlier fields).
+    ///
+    pub fn scroll_form_up(&mut self) -> &mut Self {
+        if self.form_scroll_offset > 0 {
+            self.form_scroll_offset -= 1;
+        }
+        self
+    }
+
+    /// Scroll form down (show later fields).
+    ///
+    pub fn scroll_form_down(&mut self) -> &mut Self {
+        // Don't scroll past the last field - limit is handled in rendering
+        self.form_scroll_offset += 1;
+        self
+    }
+
+    /// Get total number of form fields (standard + custom).
+    ///
+    pub fn get_total_form_field_count(&self) -> usize {
+        // Standard fields: Name, Notes, Assignee, DueDate, Section = 5
+        5 + self.project_custom_fields.len()
     }
 
     /// Initialize edit form with task data.
@@ -1872,6 +2117,24 @@ impl State {
         self.original_form_assignee = task.assignee.as_ref().map(|u| u.gid.clone());
         self.original_form_due_on = task.due_on.clone().unwrap_or_default();
         self.original_form_section = task.section.as_ref().map(|s| s.gid.clone());
+        // Initialize custom field values from task
+        self.form_custom_field_values.clear();
+        for cf in &task.custom_fields {
+            let value = match cf.resource_subtype.as_str() {
+                "text" => CustomFieldValue::Text(cf.text_value.clone().unwrap_or_default()),
+                "number" => CustomFieldValue::Number(cf.number_value),
+                "date" => CustomFieldValue::Date(cf.date_value.clone()),
+                "enum" => CustomFieldValue::Enum(cf.enum_value.as_ref().map(|e| e.gid.clone())),
+                "multi_enum" => CustomFieldValue::MultiEnum(
+                    cf.multi_enum_values.iter().map(|e| e.gid.clone()).collect(),
+                ),
+                "people" => CustomFieldValue::People(
+                    cf.people_value.iter().map(|u| u.gid.clone()).collect(),
+                ),
+                _ => continue,
+            };
+            self.form_custom_field_values.insert(cf.gid.clone(), value);
+        }
         self.edit_form_state = Some(EditFormState::Name);
         self
     }

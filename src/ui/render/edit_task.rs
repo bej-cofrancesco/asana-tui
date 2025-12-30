@@ -34,7 +34,6 @@ pub fn edit_task(frame: &mut Frame, size: Rect, state: &mut State) {
 
     // Calculate which fields to show based on available height
     // Fields have different heights: Name/Assignee/DueDate/Section = 3, Notes = 5, Custom dropdowns = 7+
-    let scroll_offset = state.get_form_scroll_offset();
     let available_height = chunks[1].height;
 
     // Build list of all fields with their heights
@@ -56,21 +55,39 @@ pub fn edit_task(frame: &mut Frame, size: Rect, state: &mut State) {
         fields
     };
 
-    // Calculate visible range based on cumulative height
-    let mut cumulative_height = 0u16;
+    // Find the index of the currently selected field
+    let current_field_idx = match form_state {
+        EditFormState::Name => 0,
+        EditFormState::Notes => 1,
+        EditFormState::Assignee => 2,
+        EditFormState::DueDate => 3,
+        EditFormState::Section => 4,
+        EditFormState::CustomField(cf_idx) => 5 + cf_idx,
+    };
+
+    // Calculate visible range centered around current field (like kanban board)
+    // Start by trying to center the current field, then fill available space
     let mut start_idx = 0;
     let mut end_idx = 0;
+    let mut cumulative_height = 0u16;
 
-    // Find start index based on scroll offset (skip first scroll_offset fields)
-    for (idx, _) in all_fields.iter().enumerate() {
-        if idx < scroll_offset {
-            continue;
+    // First, try to find a start position that centers the current field
+    // We'll work backwards from the current field to find where we can start
+    let mut height_before_current = 0u16;
+
+    // Calculate height before current field
+    for idx in (0..current_field_idx).rev() {
+        if let Some((_, _, _, height)) = all_fields.get(idx) {
+            if height_before_current + *height <= available_height / 2 {
+                height_before_current += *height;
+                start_idx = idx;
+            } else {
+                break;
+            }
         }
-        start_idx = idx;
-        break;
     }
 
-    // Find end index based on available height
+    // Now fill forward from start_idx until we run out of space
     for (idx, (_, _, _, height)) in all_fields.iter().enumerate().skip(start_idx) {
         if cumulative_height + *height > available_height.saturating_sub(2) {
             // Not enough space for this field
@@ -78,6 +95,34 @@ pub fn edit_task(frame: &mut Frame, size: Rect, state: &mut State) {
         }
         cumulative_height += *height;
         end_idx = idx + 1;
+    }
+
+    // Ensure current field is visible
+    if current_field_idx < start_idx {
+        start_idx = current_field_idx;
+        // Recalculate end_idx from new start
+        cumulative_height = 0;
+        for (idx, (_, _, _, height)) in all_fields.iter().enumerate().skip(start_idx) {
+            if cumulative_height + *height > available_height.saturating_sub(2) {
+                break;
+            }
+            cumulative_height += *height;
+            end_idx = idx + 1;
+        }
+    } else if current_field_idx >= end_idx {
+        // Current field is after end, need to scroll forward
+        // Calculate backwards from current field
+        cumulative_height = 0;
+        end_idx = current_field_idx + 1;
+        for idx in (0..=current_field_idx).rev() {
+            if let Some((_, _, _, height)) = all_fields.get(idx) {
+                if cumulative_height + *height > available_height.saturating_sub(2) {
+                    break;
+                }
+                cumulative_height += *height;
+                start_idx = idx;
+            }
+        }
     }
 
     // Ensure we show at least one field
@@ -128,7 +173,8 @@ pub fn edit_task(frame: &mut Frame, size: Rect, state: &mut State) {
                 );
             }
             "Assignee" => {
-                if form_state == EditFormState::Assignee && is_editing {
+                // Always show dropdown format when selected, like custom fields
+                if form_state == EditFormState::Assignee {
                     form_dropdowns::render_assignee_dropdown(frame, form_chunks[chunk_idx], state);
                 } else {
                     let assignee_text = if let Some(assignee_gid) = state.get_form_assignee() {
@@ -162,7 +208,8 @@ pub fn edit_task(frame: &mut Frame, size: Rect, state: &mut State) {
                 );
             }
             "Section" => {
-                if form_state == EditFormState::Section && is_editing {
+                // Always show dropdown format when selected, like custom fields
+                if form_state == EditFormState::Section {
                     form_dropdowns::render_section_dropdown(frame, form_chunks[chunk_idx], state);
                 } else {
                     let section_text = if let Some(section_gid) = state.get_form_section() {
