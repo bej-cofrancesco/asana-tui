@@ -1,47 +1,11 @@
 # Clippy configuration for code quality checks
 # See https://rust-lang.github.io/rust-clippy/master/index.html for all options
+#
+# Note: This file is for configuring Clippy's behavior, not for enabling/disabling lints.
+# To enable/disable specific lints, use attributes in code or configure them in Cargo.toml
 
-# Performance lints
-avoid-option-option = true
-avoid-redundant-closures = true
-implicit-clone = true
-large-enum-variant = true
-needless-collect = true
-needless-pass-by-value = true
-redundant-clone = true
-too-many-arguments = true
-trivial-casts = true
-unnecessary-lazy-evaluations = true
-unnecessary-wraps = true
-unused-self = true
-useless-conversion = true
-
-# Correctness lints
-as-conversions = true
-cast-possible-truncation = true
-float-cmp = true
-identity-op = true
-inefficient-to-string = true
-let-underscore-drop = true
-map-identity = true
-mut-mutex-lock = true
-panic = true
-redundant-closure = true
-redundant-features = true
-string-add = true
-todo = true
-transmute-ptr-to-ptr = true
-trivial-copy = true
-unimplemented = true
-unnecessary-unwrap = true
-unreachable = true
-unused-async = true
-unused-doc-comments = true
-unused-features = true
-unused-imports = true
-unused-must-use = true
-unused-unsafe = true
-unused-variables = true
-use-after-move = true
-use-self = true
-wrong-self-convention = true
+# Example valid configuration options (uncomment and adjust as needed):
+# msrv = "1.70"
+# too-many-arguments-threshold = 7
+# too-many-lines-threshold = 1000
+# cognitive-complexity-threshold = 30
