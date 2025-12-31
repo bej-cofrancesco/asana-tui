@@ -36,7 +36,7 @@ macro_rules! model {
             extra: std::collections::HashMap<String, serde_json::Value>,
         }
 
-        impl crate::asana::models::Model for $name {
+        impl $crate::asana::models::Model for $name {
             fn endpoint() -> String { $endpoint.to_string() }
             fn opt_strings() -> Vec<String> {
                 vec![$(format!("{}.({})", $include::endpoint(), $include::field_names().join("|"))),*]

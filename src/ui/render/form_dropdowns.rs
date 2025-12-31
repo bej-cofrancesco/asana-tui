@@ -9,6 +9,7 @@ use ratatui::{
 };
 
 /// Generic dropdown renderer - used by assignee, section, and custom fields
+#[allow(clippy::too_many_arguments)]
 fn render_dropdown_generic(
     frame: &mut Frame,
     area: Rect,
@@ -114,7 +115,7 @@ pub fn render_assignee_dropdown(frame: &mut Frame, area: Rect, state: &State) {
     render_dropdown_generic(
         frame,
         area,
-        &search_text,
+        search_text,
         "Search Assignee",
         items,
         selected_index,
@@ -151,7 +152,7 @@ pub fn render_section_dropdown(frame: &mut Frame, area: Rect, state: &State) {
     render_dropdown_generic(
         frame,
         area,
-        &search_text,
+        search_text,
         "Search Section",
         items,
         selected_index,
@@ -192,7 +193,7 @@ pub fn render_enum_dropdown(
     render_dropdown_generic(
         frame,
         area,
-        &search_text,
+        search_text,
         &format!("Search {}", cf.name),
         items,
         selected_index,

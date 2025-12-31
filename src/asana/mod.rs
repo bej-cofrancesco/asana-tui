@@ -923,6 +923,7 @@ impl Asana {
 
     /// Create a new task.
     ///
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_task(
         &mut self,
         project_gid: &str,
@@ -1067,6 +1068,7 @@ impl Asana {
 
     /// Update task fields.
     ///
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_task_fields(
         &mut self,
         task_gid: &str,
@@ -1438,7 +1440,7 @@ mod tests {
         let mock = server.mock_async(|when, then| {
             when.method("GET")
                 .path("/users/me")
-                .header("Authorization", &format!("Bearer {}", &token));
+                .header("Authorization", format!("Bearer {}", &token));
             then.status(200).json_body(json!({
                 "data": {
                     "gid": user.gid,
@@ -1493,7 +1495,7 @@ mod tests {
             .mock_async(|when, then| {
                 when.method("GET")
                     .path("/projects/")
-                    .header("Authorization", &format!("Bearer {}", &token))
+                    .header("Authorization", format!("Bearer {}", &token))
                     .query_param("workspace", &workspace.gid);
                 then.status(200).json_body(json!({
                     "data": [
@@ -1532,7 +1534,7 @@ mod tests {
             .mock_async(|when, then| {
                 when.method("GET")
                     .path("/tasks/")
-                    .header("Authorization", &format!("Bearer {}", &token))
+                    .header("Authorization", format!("Bearer {}", &token))
                     .query_param("project", &project.gid);
                 then.status(200).json_body(json!({
                     "data": [

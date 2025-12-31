@@ -230,7 +230,7 @@ fn render_comments(frame: &mut Frame, size: Rect, state: &mut State, _task: &cra
             }
 
             // Minimum 3 lines, maximum 10 lines for input box
-            lines.max(3).min(10)
+            lines.clamp(3, 10)
         }
     } else {
         0

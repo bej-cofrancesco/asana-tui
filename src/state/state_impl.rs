@@ -414,16 +414,12 @@ impl State {
 
         let shortcut = &all_shortcuts[selected_index];
 
-        match shortcut.as_str() {
-            _ => {
-                // It's a starred project
-                if let Some(project) = self.projects.iter().find(|p| p.name == shortcut.as_str()) {
-                    self.project = Some(project.to_owned());
-                    self.tasks.clear();
-                    self.dispatch(NetworkEvent::ProjectTasks);
-                    self.view_stack.push(View::ProjectTasks);
-                }
-            }
+        // It's a starred project
+        if let Some(project) = self.projects.iter().find(|p| p.name == shortcut.as_str()) {
+            self.project = Some(project.to_owned());
+            self.tasks.clear();
+            self.dispatch(NetworkEvent::ProjectTasks);
+            self.view_stack.push(View::ProjectTasks);
         }
         self.focus_view();
         self
@@ -1939,10 +1935,7 @@ impl State {
     /// Add character to custom field search.
     ///
     pub fn add_custom_field_search_char(&mut self, gid: String, c: char) -> &mut Self {
-        self.custom_field_search
-            .entry(gid)
-            .or_insert_with(String::new)
-            .push(c);
+        self.custom_field_search.entry(gid).or_default().push(c);
         self
     }
 
@@ -2306,27 +2299,22 @@ impl State {
             if index < all_shortcuts.len() {
                 let shortcut_name = &all_shortcuts[index];
 
-                // Check if it's a base shortcut - these cannot be removed
-                match shortcut_name.as_str() {
-                    _ => {
-                        // It's a starred project - find it and unstar it
-                        // First find the GID, then remove it (to avoid borrowing conflicts)
-                        let gid_to_remove = self
-                            .starred_project_names
-                            .iter()
-                            .find(|(_, name)| name.as_str() == shortcut_name.as_str())
-                            .map(|(gid, _)| gid.clone());
+                // It's a starred project - find it and unstar it
+                // First find the GID, then remove it (to avoid borrowing conflicts)
+                let gid_to_remove = self
+                    .starred_project_names
+                    .iter()
+                    .find(|(_, name)| name.as_str() == shortcut_name.as_str())
+                    .map(|(gid, _)| gid.clone());
 
-                        if let Some(gid) = gid_to_remove {
-                            self.starred_projects.remove(&gid);
-                            self.starred_project_names.remove(&gid);
-                            // Update shortcuts list state
-                            self.update_shortcuts_list_state();
-                            // Trigger config save
-                            if let Some(sender) = &self.config_save_sender {
-                                let _ = sender.send(());
-                            }
-                        }
+                if let Some(gid) = gid_to_remove {
+                    self.starred_projects.remove(&gid);
+                    self.starred_project_names.remove(&gid);
+                    // Update shortcuts list state
+                    self.update_shortcuts_list_state();
+                    // Trigger config save
+                    if let Some(sender) = &self.config_save_sender {
+                        let _ = sender.send(());
                     }
                 }
             }
@@ -2599,12 +2587,12 @@ impl State {
                     // Also validate kanban column index when filtering tasks
                     // This prevents crashes when sections become hidden due to filtering
                     let visible_indices = self.get_visible_section_indices();
-                    if !visible_indices.is_empty() {
-                        if !visible_indices.contains(&self.kanban_column_index) {
-                            // Current column is not visible, move to first visible
-                            self.kanban_column_index = visible_indices[0];
-                            self.kanban_task_index = 0;
-                        }
+                    if !visible_indices.is_empty()
+                        && !visible_indices.contains(&self.kanban_column_index)
+                    {
+                        // Current column is not visible, move to first visible
+                        self.kanban_column_index = visible_indices[0];
+                        self.kanban_task_index = 0;
                     }
                 }
             }

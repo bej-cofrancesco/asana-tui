@@ -1403,15 +1403,9 @@ impl Handler {
                         ..
                     } => {
                         if !state.is_search_mode() {
-                            match state.current_focus() {
-                                Focus::View => {
-                                    debug!(
-                                        "Processing toggle task completion event '{:?}'...",
-                                        event
-                                    );
-                                    state.toggle_task_completion();
-                                }
-                                _ => {}
+                            if state.current_focus() == &Focus::View {
+                                debug!("Processing toggle task completion event '{:?}'...", event);
+                                state.toggle_task_completion();
                             }
                         } else {
                             state.add_search_char(' ');
@@ -1423,15 +1417,9 @@ impl Handler {
                         ..
                     } => {
                         if !state.is_search_mode() {
-                            match state.current_focus() {
-                                Focus::View => {
-                                    debug!(
-                                        "Processing toggle task completion event '{:?}'...",
-                                        event
-                                    );
-                                    state.toggle_task_completion();
-                                }
-                                _ => {}
+                            if state.current_focus() == &Focus::View {
+                                debug!("Processing toggle task completion event '{:?}'...", event);
+                                state.toggle_task_completion();
                             }
                         } else {
                             state.add_search_char('x');
@@ -1495,34 +1483,34 @@ impl Handler {
                             state.add_search_char('e');
                         } else if state.is_comment_input_mode() {
                             state.add_comment_char('e');
-                        } else if matches!(state.current_focus(), Focus::View) {
-                            if matches!(state.current_view(), crate::state::View::TaskDetail) {
-                                // Edit task from detail view
-                                debug!("Processing edit task event '{:?}'...", event);
-                                // Initialize form with task data (including custom fields)
-                                if let Some(task) = state.get_task_detail() {
-                                    let task_clone = task.clone();
-                                    state.init_edit_form(&task_clone);
+                        } else if matches!(state.current_focus(), Focus::View)
+                            && matches!(state.current_view(), crate::state::View::TaskDetail)
+                        {
+                            // Edit task from detail view
+                            debug!("Processing edit task event '{:?}'...", event);
+                            // Initialize form with task data (including custom fields)
+                            if let Some(task) = state.get_task_detail() {
+                                let task_clone = task.clone();
+                                state.init_edit_form(&task_clone);
 
-                                    // Load workspace users and sections for dropdowns
-                                    if let Some(workspace) = state.get_active_workspace() {
-                                        state.dispatch(
-                                            crate::events::network::Event::GetWorkspaceUsers {
-                                                workspace_gid: workspace.gid.clone(),
-                                            },
-                                        );
-                                    }
-                                    if let Some(project) = state.get_project() {
-                                        state.dispatch(
-                                            crate::events::network::Event::GetProjectSections {
-                                                project_gid: project.gid.clone(),
-                                            },
-                                        );
-                                    }
-
-                                    state.push_view(crate::state::View::EditTask);
-                                    state.focus_view();
+                                // Load workspace users and sections for dropdowns
+                                if let Some(workspace) = state.get_active_workspace() {
+                                    state.dispatch(
+                                        crate::events::network::Event::GetWorkspaceUsers {
+                                            workspace_gid: workspace.gid.clone(),
+                                        },
+                                    );
                                 }
+                                if let Some(project) = state.get_project() {
+                                    state.dispatch(
+                                        crate::events::network::Event::GetProjectSections {
+                                            project_gid: project.gid.clone(),
+                                        },
+                                    );
+                                }
+
+                                state.push_view(crate::state::View::EditTask);
+                                state.focus_view();
                             }
                         }
                     }
@@ -1535,15 +1523,13 @@ impl Handler {
                             state.add_search_char('c');
                         } else if state.is_comment_input_mode() {
                             state.add_comment_char('c');
-                        } else if matches!(state.current_focus(), Focus::View) {
-                            if matches!(state.current_view(), crate::state::View::TaskDetail) {
-                                // Add comment from detail view - switch to Comments panel first
-                                debug!("Processing add comment event '{:?}'...", event);
-                                state.set_current_task_panel(
-                                    crate::state::TaskDetailPanel::Comments,
-                                );
-                                state.enter_comment_input_mode();
-                            }
+                        } else if matches!(state.current_focus(), Focus::View)
+                            && matches!(state.current_view(), crate::state::View::TaskDetail)
+                        {
+                            // Add comment from detail view - switch to Comments panel first
+                            debug!("Processing add comment event '{:?}'...", event);
+                            state.set_current_task_panel(crate::state::TaskDetailPanel::Comments);
+                            state.enter_comment_input_mode();
                         }
                     }
                     KeyEvent {
@@ -1752,20 +1738,15 @@ impl Handler {
                                     warn!("Cannot save task: no task detail available");
                                 }
                             }
-                        } else {
-                            match state.current_focus() {
-                                Focus::Menu => {
-                                    debug!("Processing star/unstar event '{:?}'...", event);
-                                    match state.current_menu() {
-                                        Menu::TopList => {
-                                            state.toggle_star_current_project();
-                                        }
-                                        Menu::Shortcuts => {
-                                            // Unstar from shortcuts list (only works for starred projects)
-                                            state.unstar_current_shortcut();
-                                        }
-                                        _ => {}
-                                    }
+                        } else if state.current_focus() == &Focus::Menu {
+                            debug!("Processing star/unstar event '{:?}'...", event);
+                            match state.current_menu() {
+                                Menu::TopList => {
+                                    state.toggle_star_current_project();
+                                }
+                                Menu::Shortcuts => {
+                                    // Unstar from shortcuts list (only works for starred projects)
+                                    state.unstar_current_shortcut();
                                 }
                                 _ => {}
                             }
@@ -1836,24 +1817,14 @@ impl Handler {
                     } => {
                         if state.is_search_mode() {
                             state.add_search_char('m');
-                        } else if !state.is_debug_mode() {
-                            match state.current_focus() {
-                                Focus::View => {
-                                    if matches!(
-                                        state.current_view(),
-                                        crate::state::View::ProjectTasks
-                                    ) {
-                                        // Open section selection modal for moving task
-                                        if let Some(task) = state.get_kanban_selected_task() {
-                                            debug!(
-                                                "Opening move task modal for task {}...",
-                                                task.gid
-                                            );
-                                            state.set_move_task_gid(Some(task.gid.clone()));
-                                        }
-                                    }
-                                }
-                                _ => {}
+                        } else if !state.is_debug_mode()
+                            && state.current_focus() == &Focus::View
+                            && matches!(state.current_view(), crate::state::View::ProjectTasks)
+                        {
+                            // Open section selection modal for moving task
+                            if let Some(task) = state.get_kanban_selected_task() {
+                                debug!("Opening move task modal for task {}...", task.gid);
+                                state.set_move_task_gid(Some(task.gid.clone()));
                             }
                         }
                     }
@@ -1880,47 +1851,36 @@ impl Handler {
                     } => {
                         if state.is_search_mode() {
                             state.add_search_char('n');
-                        } else if !state.is_debug_mode() {
-                            match state.current_focus() {
-                                Focus::View => {
-                                    if matches!(
-                                        state.current_view(),
-                                        crate::state::View::ProjectTasks
-                                            | crate::state::View::TaskDetail
-                                    ) {
-                                        // Enter create task view
-                                        debug!("Processing create task event '{:?}'...", event);
-                                        // Initialize form state
-                                        state.clear_form();
-                                        state.set_edit_form_state(Some(
-                                            crate::state::EditFormState::Name,
-                                        ));
-                                        // Load workspace users and sections if needed
-                                        if let Some(workspace) = state.get_active_workspace() {
-                                            state.dispatch(
-                                                crate::events::network::Event::GetWorkspaceUsers {
-                                                    workspace_gid: workspace.gid.clone(),
-                                                },
-                                            );
-                                        }
-                                        if let Some(project) = state.get_project() {
-                                            state.dispatch(
-                                                crate::events::network::Event::GetProjectSections {
-                                                    project_gid: project.gid.clone(),
-                                                },
-                                            );
-                                            state.dispatch(
-                                                crate::events::network::Event::GetProjectCustomFields {
-                                                    project_gid: project.gid.clone(),
-                                                },
-                                            );
-                                        }
-                                        state.push_view(crate::state::View::CreateTask);
-                                        state.focus_view();
-                                    }
-                                }
-                                _ => {}
+                        } else if !state.is_debug_mode()
+                            && state.current_focus() == &Focus::View
+                            && matches!(
+                                state.current_view(),
+                                crate::state::View::ProjectTasks | crate::state::View::TaskDetail
+                            )
+                        {
+                            // Enter create task view
+                            debug!("Processing create task event '{:?}'...", event);
+                            // Initialize form state
+                            state.clear_form();
+                            state.set_edit_form_state(Some(crate::state::EditFormState::Name));
+                            // Load workspace users and sections if needed
+                            if let Some(workspace) = state.get_active_workspace() {
+                                state.dispatch(crate::events::network::Event::GetWorkspaceUsers {
+                                    workspace_gid: workspace.gid.clone(),
+                                });
                             }
+                            if let Some(project) = state.get_project() {
+                                state.dispatch(crate::events::network::Event::GetProjectSections {
+                                    project_gid: project.gid.clone(),
+                                });
+                                state.dispatch(
+                                    crate::events::network::Event::GetProjectCustomFields {
+                                        project_gid: project.gid.clone(),
+                                    },
+                                );
+                            }
+                            state.push_view(crate::state::View::CreateTask);
+                            state.focus_view();
                         }
                     }
                     KeyEvent {
@@ -1974,49 +1934,49 @@ impl Handler {
                         modifiers: KeyModifiers::NONE,
                         ..
                     } => {
-                        if !state.is_search_mode() && !state.is_comment_input_mode() {
-                            if matches!(
+                        if !state.is_search_mode()
+                            && !state.is_comment_input_mode()
+                            && matches!(
                                 state.current_view(),
                                 crate::state::View::CreateTask | crate::state::View::EditTask
-                            ) {
-                                let custom_fields = state.get_project_custom_fields();
-                                let next_state = match state.get_edit_form_state() {
-                                    Some(crate::state::EditFormState::Name) => {
-                                        crate::state::EditFormState::Notes
-                                    }
-                                    Some(crate::state::EditFormState::Notes) => {
-                                        crate::state::EditFormState::Assignee
-                                    }
-                                    Some(crate::state::EditFormState::Assignee) => {
-                                        crate::state::EditFormState::DueDate
-                                    }
-                                    Some(crate::state::EditFormState::DueDate) => {
-                                        crate::state::EditFormState::Section
-                                    }
-                                    Some(crate::state::EditFormState::Section) => {
-                                        if !custom_fields.is_empty() {
-                                            crate::state::EditFormState::CustomField(0)
-                                        } else {
-                                            crate::state::EditFormState::Name
-                                        }
-                                    }
-                                    Some(crate::state::EditFormState::CustomField(idx)) => {
-                                        if idx + 1 < custom_fields.len() {
-                                            crate::state::EditFormState::CustomField(idx + 1)
-                                        } else {
-                                            crate::state::EditFormState::Name
-                                        }
-                                    }
-                                    None => crate::state::EditFormState::Name,
-                                };
-                                state.set_edit_form_state(Some(next_state));
-                                // Initialize dropdown indices when entering assignee or section fields
-                                if matches!(next_state, crate::state::EditFormState::Assignee) {
-                                    state.init_assignee_dropdown_index();
-                                } else if matches!(next_state, crate::state::EditFormState::Section)
-                                {
-                                    state.init_section_dropdown_index();
+                            )
+                        {
+                            let custom_fields = state.get_project_custom_fields();
+                            let next_state = match state.get_edit_form_state() {
+                                Some(crate::state::EditFormState::Name) => {
+                                    crate::state::EditFormState::Notes
                                 }
+                                Some(crate::state::EditFormState::Notes) => {
+                                    crate::state::EditFormState::Assignee
+                                }
+                                Some(crate::state::EditFormState::Assignee) => {
+                                    crate::state::EditFormState::DueDate
+                                }
+                                Some(crate::state::EditFormState::DueDate) => {
+                                    crate::state::EditFormState::Section
+                                }
+                                Some(crate::state::EditFormState::Section) => {
+                                    if !custom_fields.is_empty() {
+                                        crate::state::EditFormState::CustomField(0)
+                                    } else {
+                                        crate::state::EditFormState::Name
+                                    }
+                                }
+                                Some(crate::state::EditFormState::CustomField(idx)) => {
+                                    if idx + 1 < custom_fields.len() {
+                                        crate::state::EditFormState::CustomField(idx + 1)
+                                    } else {
+                                        crate::state::EditFormState::Name
+                                    }
+                                }
+                                None => crate::state::EditFormState::Name,
+                            };
+                            state.set_edit_form_state(Some(next_state));
+                            // Initialize dropdown indices when entering assignee or section fields
+                            if matches!(next_state, crate::state::EditFormState::Assignee) {
+                                state.init_assignee_dropdown_index();
+                            } else if matches!(next_state, crate::state::EditFormState::Section) {
+                                state.init_section_dropdown_index();
                             }
                         }
                     }
@@ -2025,50 +1985,50 @@ impl Handler {
                         modifiers: KeyModifiers::SHIFT,
                         ..
                     } => {
-                        if !state.is_search_mode() && !state.is_comment_input_mode() {
-                            if matches!(
+                        if !state.is_search_mode()
+                            && !state.is_comment_input_mode()
+                            && matches!(
                                 state.current_view(),
                                 crate::state::View::CreateTask | crate::state::View::EditTask
-                            ) {
-                                let custom_fields = state.get_project_custom_fields();
-                                let prev_state = match state.get_edit_form_state() {
-                                    Some(crate::state::EditFormState::Name) => {
-                                        if !custom_fields.is_empty() {
-                                            crate::state::EditFormState::CustomField(
-                                                custom_fields.len() - 1,
-                                            )
-                                        } else {
-                                            crate::state::EditFormState::Section
-                                        }
-                                    }
-                                    Some(crate::state::EditFormState::Notes) => {
-                                        crate::state::EditFormState::Name
-                                    }
-                                    Some(crate::state::EditFormState::Assignee) => {
-                                        crate::state::EditFormState::Notes
-                                    }
-                                    Some(crate::state::EditFormState::DueDate) => {
-                                        crate::state::EditFormState::Assignee
-                                    }
-                                    Some(crate::state::EditFormState::Section) => {
-                                        crate::state::EditFormState::DueDate
-                                    }
-                                    Some(crate::state::EditFormState::CustomField(0)) => {
+                            )
+                        {
+                            let custom_fields = state.get_project_custom_fields();
+                            let prev_state = match state.get_edit_form_state() {
+                                Some(crate::state::EditFormState::Name) => {
+                                    if !custom_fields.is_empty() {
+                                        crate::state::EditFormState::CustomField(
+                                            custom_fields.len() - 1,
+                                        )
+                                    } else {
                                         crate::state::EditFormState::Section
                                     }
-                                    Some(crate::state::EditFormState::CustomField(idx)) => {
-                                        crate::state::EditFormState::CustomField(idx - 1)
-                                    }
-                                    None => crate::state::EditFormState::Name,
-                                };
-                                state.set_edit_form_state(Some(prev_state));
-                                // Initialize dropdown indices when entering assignee or section fields
-                                if matches!(prev_state, crate::state::EditFormState::Assignee) {
-                                    state.init_assignee_dropdown_index();
-                                } else if matches!(prev_state, crate::state::EditFormState::Section)
-                                {
-                                    state.init_section_dropdown_index();
                                 }
+                                Some(crate::state::EditFormState::Notes) => {
+                                    crate::state::EditFormState::Name
+                                }
+                                Some(crate::state::EditFormState::Assignee) => {
+                                    crate::state::EditFormState::Notes
+                                }
+                                Some(crate::state::EditFormState::DueDate) => {
+                                    crate::state::EditFormState::Assignee
+                                }
+                                Some(crate::state::EditFormState::Section) => {
+                                    crate::state::EditFormState::DueDate
+                                }
+                                Some(crate::state::EditFormState::CustomField(0)) => {
+                                    crate::state::EditFormState::Section
+                                }
+                                Some(crate::state::EditFormState::CustomField(idx)) => {
+                                    crate::state::EditFormState::CustomField(idx - 1)
+                                }
+                                None => crate::state::EditFormState::Name,
+                            };
+                            state.set_edit_form_state(Some(prev_state));
+                            // Initialize dropdown indices when entering assignee or section fields
+                            if matches!(prev_state, crate::state::EditFormState::Assignee) {
+                                state.init_assignee_dropdown_index();
+                            } else if matches!(prev_state, crate::state::EditFormState::Section) {
+                                state.init_section_dropdown_index();
                             }
                         }
                     }

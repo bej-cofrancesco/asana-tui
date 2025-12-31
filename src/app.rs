@@ -55,7 +55,7 @@ impl App {
 
         // Load theme from config
         let theme = crate::ui::Theme::from_name(&config.theme_name)
-            .unwrap_or_else(|| crate::ui::Theme::default()); // Theme fallback is safe
+            .unwrap_or_else(crate::ui::Theme::default); // Theme fallback is safe
 
         let state = Arc::new(RwLock::new(State::new(
             tx.clone(),
@@ -77,19 +77,11 @@ impl App {
         let state_for_log_processor = Arc::clone(&state);
         tokio::task::spawn_blocking(move || {
             let handle = tokio::runtime::Handle::current();
-            loop {
-                match log_rx.recv() {
-                    Ok(log_entry) => {
-                        handle.block_on(async {
-                            let mut state = state_for_log_processor.write().await;
-                            state.add_log_entry(log_entry);
-                        });
-                    }
-                    Err(_) => {
-                        // Channel closed, exit gracefully
-                        break;
-                    }
-                }
+            while let Ok(log_entry) = log_rx.recv() {
+                handle.block_on(async {
+                    let mut state = state_for_log_processor.write().await;
+                    state.add_log_entry(log_entry);
+                });
             }
         });
 

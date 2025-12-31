@@ -362,11 +362,8 @@ impl<'a> Handler<'a> {
             let state = self.state.read().await;
             view = state.current_view().clone();
         }
-        match view {
-            crate::state::View::ProjectTasks => {
-                self.project_tasks().await?;
-            }
-            _ => {}
+        if view == crate::state::View::ProjectTasks {
+            self.project_tasks().await?;
         }
         Ok(())
     }
@@ -524,6 +521,7 @@ impl<'a> Handler<'a> {
 
     /// Create a new task.
     ///
+    #[allow(clippy::too_many_arguments)]
     async fn create_task(
         &mut self,
         project_gid: String,
@@ -580,6 +578,7 @@ impl<'a> Handler<'a> {
 
     /// Update task fields.
     ///
+    #[allow(clippy::too_many_arguments)]
     async fn update_task_fields(
         &mut self,
         gid: String,

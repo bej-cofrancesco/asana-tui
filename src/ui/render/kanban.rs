@@ -73,9 +73,7 @@ fn render_kanban_columns(frame: &mut Frame, column_chunks: &[Rect], state: &Stat
     let num_to_show = column_chunks.len().min(num_visible);
 
     // Determine start position: try to center current column, but adjust if near edges
-    let start_pos = if num_visible <= num_to_show {
-        0
-    } else if current_pos < num_to_show / 2 {
+    let start_pos = if num_visible <= num_to_show || current_pos < num_to_show / 2 {
         0
     } else if current_pos >= num_visible - num_to_show / 2 {
         num_visible - num_to_show

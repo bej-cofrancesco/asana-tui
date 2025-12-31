@@ -123,7 +123,7 @@ fn render_onboarding(frame: &mut Frame, size: Rect, state: &State) {
     let input_text = if token_input.is_empty() {
         "Enter token here...".to_string()
     } else {
-        format!("{}", "*".repeat(token_input.len().min(50)))
+        "*".repeat(token_input.len().min(50)).to_string()
     };
 
     let input_block = Block::default()

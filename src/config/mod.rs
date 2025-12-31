@@ -85,7 +85,7 @@ impl Config {
 
         // If file exists, try to extract token and starred projects
         if file_path.exists() {
-            let contents = fs::read_to_string(&file_path).map_err(|e| ConfigError::LoadFailed {
+            let contents = fs::read_to_string(file_path).map_err(|e| ConfigError::LoadFailed {
                 path: file_path.clone(),
                 message: format!("IO error: {}", e),
             })?;

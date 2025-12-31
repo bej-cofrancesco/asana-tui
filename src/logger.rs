@@ -20,10 +20,12 @@ pub fn format_log(record: &Record) -> String {
     format!("{} {} {}", timestamp, level_str, record.args())
 }
 
+type LogCallback = Box<dyn Fn(String) + Send + Sync>;
+
 /// Custom logger that captures logs to state
 ///
 pub struct CustomLogger {
-    log_callback: Arc<Mutex<Option<Box<dyn Fn(String) + Send + Sync>>>>,
+    log_callback: Arc<Mutex<Option<LogCallback>>>,
 }
 
 impl CustomLogger {
@@ -33,7 +35,7 @@ impl CustomLogger {
         }
     }
 
-    pub fn set_log_callback(&self, callback: Box<dyn Fn(String) + Send + Sync>) {
+    pub fn set_log_callback(&self, callback: LogCallback) {
         if let Ok(mut guard) = self.log_callback.lock() {
             *guard = Some(callback);
         }
