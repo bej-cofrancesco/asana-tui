@@ -1,3 +1,8 @@
+//! Asana resource type definitions.
+//!
+//! This module defines the core data structures used to represent Asana resources
+//! such as users, workspaces, projects, tasks, sections, tags, and custom fields.
+
 use fake::Dummy;
 
 /// Defines user data structure.
@@ -51,8 +56,8 @@ pub struct CustomField {
     pub name: String,
     pub resource_subtype: String, // text, number, date, enum, multi_enum, people, reference
     pub representation_type: Option<String>, // text, enum, multi_enum, number, date, people, formula, custom_id, reference
-    pub id_prefix: Option<String>, // Custom ID prefix (only set for custom_id fields)
-    pub enum_options: Vec<EnumOption>, // For enum and multi_enum types
+    pub id_prefix: Option<String>,           // Custom ID prefix (only set for custom_id fields)
+    pub enum_options: Vec<EnumOption>,       // For enum and multi_enum types
     // Values (only one will be set based on resource_subtype)
     pub text_value: Option<String>,
     pub number_value: Option<f64>,

@@ -1,90 +1,203 @@
+name: CI
+
 on:
   pull_request:
   push:
-    branches: master
+    branches: [master, main]
+  workflow_dispatch:
 
-name: Continuous Integration
+# Allow only one concurrent workflow run per branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
-  # Workaround for making Github Actions skip based on commit message `[skip ci]`
-  # Source https://gist.github.com/ybiquitous/c80f15c18319c63cae8447a3be341267
-  prepare:
+  # Skip CI if commit message contains [skip ci]
+  check-skip:
+    name: Check Skip CI
     runs-on: ubuntu-latest
-    if: |
-      !contains(format('{0} {1} {2}', github.event.head_commit.message, github.event.pull_request.title, github.event.pull_request.body), '[skip ci]')
+    outputs:
+      skip: ${{ steps.skip.outputs.skip }}
     steps:
-      - run: |
-          cat <<'MESSAGE'
-          github.event_name: ${{ toJson(github.event_name) }}
-          github.event:
-          ${{ toJson(github.event) }}
-          MESSAGE
+      - uses: actions/checkout@v4
+      - id: skip
+        run: |
+          if echo "${{ github.event.head_commit.message }}${{ github.event.pull_request.title }}${{ github.event.pull_request.body }}" | grep -qE '\[skip ci\]|\[ci skip\]'; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
 
+  # Check that code compiles
   check:
     name: Check
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: check-skip
+    if: needs.check-skip.outputs.skip == 'false'
     steps:
-      - uses: actions/checkout@master
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          profile: minimal
-          override: true
-      - uses: actions-rs/cargo@v1
+          components: rustfmt, clippy
+      - name: Cache cargo registry and git db
+        uses: actions/cache@v4
         with:
-          command: check
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Check code
+        run: cargo check --all-targets
 
+  # Run tests
   test:
     name: Test Suite
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: check-skip
+    if: needs.check-skip.outputs.skip == 'false'
     steps:
-      - uses: actions/checkout@master
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y -qq \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
+      - name: Cache cargo registry and git db
+        uses: actions/cache@v4
         with:
-          toolchain: stable
-          profile: minimal
-          override: true
-      # Dependencies for `clipboard`
-      - run: sudo apt-get install -y -qq libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
-      - uses: Swatinem/rust-cache@v1
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Run tests
+        run: cargo test --all-targets --verbose
+      - name: Run tests with output
+        if: failure()
+        run: cargo test --all-targets -- --nocapture
 
+  # Check code formatting
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: check-skip
+    if: needs.check-skip.outputs.skip == 'false'
     steps:
-      - uses: actions/checkout@master
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          profile: minimal
-          override: true
           components: rustfmt
-      - uses: Swatinem/rust-cache@v1
-      - uses: actions-rs/cargo@v1
+      - name: Cache cargo registry
+        uses: actions/cache@v4
         with:
-          command: fmt
-          args: --all -- --check
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-registry
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
+  # Run clippy linter
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: check-skip
+    if: needs.check-skip.outputs.skip == 'false'
     steps:
-      - uses: actions/checkout@master
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          profile: minimal
-          override: true
           components: clippy
-      - uses: Swatinem/rust-cache@v1
-      - uses: actions-rs/cargo@v1
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y -qq \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
+      - name: Cache cargo registry and git db
+        uses: actions/cache@v4
         with:
-          command: clippy
-          args: -- -D warnings
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Upload clippy results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clippy-output
+          path: target/clippy-output.txt
+          if-no-files-found: ignore
+
+  # Build release binary
+  build:
+    name: Build Release
+    runs-on: ubuntu-latest
+    needs: [check, test, fmt, clippy]
+    if: needs.check-skip.outputs.skip == 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y -qq \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
+      - name: Cache cargo registry and git db
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Build release
+        run: cargo build --release --verbose
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binary
+          path: target/release/asana-tui
+          if-no-files-found: warn

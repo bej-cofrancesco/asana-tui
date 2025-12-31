@@ -35,7 +35,7 @@ pub fn shortcuts(frame: &mut Frame, size: Rect, state: &mut State) {
     // Show spinner if projects haven't loaded yet and we have starred projects from config
     let has_starred_projects = !state.get_starred_project_gids().is_empty();
     let projects_loaded = !state.get_projects().is_empty();
-    
+
     // Only show spinner if we have starred projects from config but projects haven't loaded yet
     // Once projects load, always show shortcuts (even if empty)
     if has_starred_projects && !projects_loaded {
@@ -46,7 +46,7 @@ pub fn shortcuts(frame: &mut Frame, size: Rect, state: &mut State) {
 
     // Get all shortcuts (starred projects first, then base shortcuts)
     let all_shortcuts = state.get_all_shortcuts_with_update();
-    
+
     let items: Vec<ListItem> = all_shortcuts
         .iter()
         .map(|s| ListItem::new(s.to_owned()))
@@ -56,6 +56,6 @@ pub fn shortcuts(frame: &mut Frame, size: Rect, state: &mut State) {
         .style(styling::normal_text_style(&theme))
         .highlight_style(list_item_style)
         .block(block);
-    
+
     frame.render_stateful_widget(list, size, state.get_shortcuts_list_state());
 }

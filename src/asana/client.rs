@@ -1,3 +1,8 @@
+//! HTTP client for Asana API requests.
+//!
+//! This module provides a low-level HTTP client wrapper for making requests
+//! to the Asana API, handling authentication, pagination, and response parsing.
+
 use super::models::*;
 use anyhow::Result;
 use reqwest::{Method, Response};
@@ -14,12 +19,18 @@ pub struct Client {
 impl Client {
     /// Returns a new instance for the given access token and base URL.
     ///
+    /// # Panics
+    /// Panics if the HTTP client cannot be created. This should never happen
+    /// in practice as reqwest::Client::builder().build() only fails on
+    /// invalid configuration, which we don't use.
     pub fn new(access_token: &str, base_url: &str) -> Self {
         Client {
             access_token: access_token.to_owned(),
             base_url: base_url.to_owned(),
             endpoint: String::from(""),
-            http_client: reqwest::Client::builder().build().unwrap(),
+            http_client: reqwest::Client::builder()
+                .build()
+                .expect("Failed to create HTTP client - this should never happen"),
         }
     }
 
@@ -32,13 +43,6 @@ impl Client {
             .json()
             .await?;
         Ok(model.data)
-    }
-
-    /// Return vector of model data or error.
-    ///
-    #[allow(dead_code)]
-    pub async fn list<T: Model>(&mut self, params: Option<Vec<(&str, &str)>>) -> Result<Vec<T>> {
-        self.list_paginated::<T>(params, Some(100)).await
     }
 
     /// Return vector of model data with pagination support.
@@ -158,7 +162,10 @@ impl Client {
                         }
                         // Check if it's missing the data field but otherwise valid JSON
                         if json_value.get("data").is_none() {
-                            log::warn!("API response missing 'data' field, but otherwise valid. Response: {}", response_text);
+                            log::warn!(
+                                "API response missing 'data' field, but otherwise valid. Response: {}",
+                                response_text
+                            );
                             self.endpoint.clear();
                             break;
                         }
@@ -189,8 +196,7 @@ impl Client {
 
     /// Prepare endpoint for relational model data.
     ///
-    #[allow(dead_code)]
-    pub fn from<T: Model>(&mut self, relational_gid: &str) -> &mut Client {
+    pub(crate) fn from<T: Model>(&mut self, relational_gid: &str) -> &mut Client {
         self.endpoint = format!("{}/{}/", T::endpoint(), relational_gid);
         self
     }

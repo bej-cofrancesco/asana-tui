@@ -50,7 +50,7 @@ pub fn render_welcome(frame: &mut Frame, size: Rect, state: &State) {
 fn render_logged_in_welcome(frame: &mut Frame, size: Rect, _state: &State) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(6), Constraint::Length(94)].as_ref())
+        .constraints([Constraint::Length(6), Constraint::Length(105)].as_ref())
         .margin(2)
         .split(size);
 

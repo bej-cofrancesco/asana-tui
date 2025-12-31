@@ -204,7 +204,7 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(1),
-            Constraint::Length(right_content_width.try_into().unwrap()),
+            Constraint::Length(right_content_width.try_into().unwrap_or(0)),
         ])
         .split(size);
 

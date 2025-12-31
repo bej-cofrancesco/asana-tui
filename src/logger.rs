@@ -1,3 +1,8 @@
+//! Custom logging module.
+//!
+//! This module provides a custom logger implementation that captures log entries
+//! and forwards them to the application state for display in the UI.
+
 use log::{Level, Log, Metadata, Record};
 use std::sync::{Arc, Mutex};
 
@@ -29,7 +34,11 @@ impl CustomLogger {
     }
 
     pub fn set_log_callback(&self, callback: Box<dyn Fn(String) + Send + Sync>) {
-        *self.log_callback.lock().unwrap() = Some(callback);
+        if let Ok(mut guard) = self.log_callback.lock() {
+            *guard = Some(callback);
+        }
+        // If lock fails, we can't set the callback, but this is non-critical
+        // The logger will still work, just won't capture to state
     }
 }
 

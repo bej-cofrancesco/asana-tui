@@ -1,20 +1,27 @@
+//! Asana TUI - A terminal user interface for managing Asana tasks and projects.
+//!
+//! This is the main entry point for the application. It initializes the CLI,
+//! loads configuration, and starts the application.
+
 mod app;
 mod asana;
 mod config;
+mod error;
 mod events;
 mod logger;
 mod state;
 mod ui;
+mod utils;
 
-use anyhow::Result;
 use app::App;
 use clap::{App as ClapApp, Arg};
 use config::Config;
+use error::AppResult;
 
 /// Parse command and start app with corresponding configuration.
 ///
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> AppResult<()> {
     let clap_app = ClapApp::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
@@ -31,6 +38,5 @@ async fn main() -> Result<()> {
     let mut config = Config::new();
     config.load(matches.value_of("config"))?;
 
-    App::start(config).await?;
-    Ok(())
+    App::start(config).await
 }

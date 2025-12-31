@@ -1,5 +1,5 @@
 use super::welcome;
-use super::{Frame, create_task, edit_task, kanban, task_detail};
+use super::{create_task, edit_task, kanban, task_detail, Frame};
 use crate::state::{State, View};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
@@ -45,19 +45,11 @@ pub fn main(frame: &mut Frame, size: Rect, state: &mut State) {
                 render_delete_confirmation(frame, size, &task_name, state);
             }
         }
-        View::KanbanBoard => {
-            kanban::kanban(frame, size, state);
-        }
         View::CreateTask => {
             create_task::create_task(frame, size, state);
         }
         View::EditTask => {
             edit_task::edit_task(frame, size, state);
-        }
-        View::MoveTaskSection => {
-            // This view is handled as a modal overlay in ProjectTasks
-            // Fallback: render kanban
-            kanban::kanban(frame, size, state);
         }
     }
 

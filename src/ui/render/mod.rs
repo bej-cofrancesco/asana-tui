@@ -1,3 +1,8 @@
+//! UI rendering module.
+//!
+//! This module contains all the rendering functions for different views and widgets
+//! in the application, including kanban boards, task details, forms, and status displays.
+
 mod all;
 mod create_task;
 mod edit_task;

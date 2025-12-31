@@ -1,3 +1,8 @@
+//! Terminal event handling module.
+//!
+//! This module handles all terminal input events, including keyboard input, mouse events,
+//! and user interactions. It processes these events and updates the application state accordingly.
+
 use crate::state::{Focus, Menu, State};
 use anyhow::Result;
 use clipboard::{ClipboardContext, ClipboardProvider};
@@ -37,12 +42,17 @@ impl Handler {
         thread::spawn(move || {
             loop {
                 let tick_rate = Duration::from_millis(TICK_RATE_IN_MS);
-                if event::poll(tick_rate).unwrap() {
-                    if let CrosstermEvent::Key(key) = event::read().unwrap() {
-                        tx_clone.send(Event::Input(key)).unwrap();
+                if let Ok(ready) = event::poll(tick_rate) {
+                    if ready {
+                        if let Ok(CrosstermEvent::Key(key)) = event::read() {
+                            let _ = tx_clone.send(Event::Input(key));
+                        }
                     }
                 }
-                tx_clone.send(Event::Tick).unwrap();
+                // Tick events are best-effort; if channel is closed, exit thread
+                if tx_clone.send(Event::Tick).is_err() {
+                    break;
+                }
             }
         });
         Handler { rx, _tx: tx }
@@ -815,8 +825,7 @@ impl Handler {
                                 match popped_view {
                                     crate::state::View::TaskDetail
                                     | crate::state::View::EditTask
-                                    | crate::state::View::CreateTask
-                                    | crate::state::View::KanbanBoard => {
+                                    | crate::state::View::CreateTask => {
                                         // Refresh the parent view (usually ProjectTasks)
                                         if matches!(
                                             state.current_view(),
@@ -1371,7 +1380,7 @@ impl Handler {
                                         }
                                     } else if matches!(
                                         state.current_view(),
-                                        crate::state::View::KanbanBoard
+                                        crate::state::View::Welcome
                                     ) {
                                         // Kanban board view: view task details
                                         if let Some(task) = state.get_kanban_selected_task() {

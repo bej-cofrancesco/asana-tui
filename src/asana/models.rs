@@ -1,3 +1,8 @@
+//! Asana API model definitions and macros.
+//!
+//! This module provides the `model!` macro for generating Asana API model structs
+//! and the `Model` trait for working with these models.
+
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
@@ -57,12 +62,6 @@ pub(crate) struct Wrapper<T> {
 #[derive(Deserialize, Debug)]
 pub(crate) struct NextPage {
     pub offset: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    path: Option<String>,
-    #[serde(default)]
-    #[allow(dead_code)]
-    uri: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]

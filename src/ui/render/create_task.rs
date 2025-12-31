@@ -437,7 +437,15 @@ fn render_custom_field_inner(
                 Some(CustomFieldValue::Text(s)) => s.clone(),
                 _ => String::new(),
             };
-            render_field(frame, size, &cf.name, &text_value, is_selected, is_editing, state);
+            render_field(
+                frame,
+                size,
+                &cf.name,
+                &text_value,
+                is_selected,
+                is_editing,
+                state,
+            );
         }
         "number" => {
             let num_value = match &value {
@@ -727,7 +735,7 @@ fn render_people_dropdown(
     if !items.is_empty() {
         list_state.select(Some(visible_selected.min(items.len().saturating_sub(1))));
     }
-    
+
     let theme = state.get_theme();
     let list = List::new(items)
         .block(block)

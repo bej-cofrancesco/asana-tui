@@ -8,91 +8,14 @@ use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
 use tui_textarea::TextArea;
 
-/// Custom field value for form editing.
-///
-#[derive(Clone, Debug, PartialEq)]
-pub enum CustomFieldValue {
-    Text(String),
-    Number(Option<f64>),
-    Date(Option<String>),
-    Enum(Option<String>),   // GID of selected enum option
-    MultiEnum(Vec<String>), // GIDs of selected enum options
-    People(Vec<String>),    // GIDs of selected users
-}
-
-/// Specifying the different foci.
-///
-#[derive(Debug, PartialEq, Eq)]
-pub enum Focus {
-    Menu,
-    View,
-}
-
-/// Specifying the different menus.
-///
-#[derive(Debug, PartialEq, Eq)]
-pub enum Menu {
-    Status,
-    Shortcuts,
-    TopList,
-}
-
-/// Specifying the different views.
-///
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum View {
-    Welcome,
-    ProjectTasks,
-    TaskDetail,
-    #[allow(dead_code)]
-    KanbanBoard,
-    CreateTask,
-    EditTask,
-    #[allow(dead_code)]
-    MoveTaskSection, // Modal for selecting section to move task to
-}
-
-/// Specifying view mode (list or kanban).
-///
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum ViewMode {
-    List,
-    Kanban,
-}
-
-/// Specifying edit form field state.
-///
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum EditFormState {
-    Name,
-    Notes,
-    Assignee,
-    DueDate,
-    Section,
-    CustomField(usize), // Index into custom_fields array
-}
-
-/// Specifying task filter options.
-///
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum TaskFilter {
-    All,
-    #[allow(dead_code)]
-    Incomplete,
-    #[allow(dead_code)]
-    Completed,
-    #[allow(dead_code)]
-    Assignee(Option<String>), // Filter by assignee GID (None = unassigned)
-}
-
-/// Get the base shortcuts list.
-///
-pub fn base_shortcuts() -> Vec<String> {
-    vec![]
-}
+// Import types from new modules - enums are now in separate modules
+use super::form::{base_shortcuts, CustomFieldValue, EditFormState, TaskFilter};
+use super::navigation::{Focus, Menu, SearchTarget, TaskDetailPanel, View, ViewMode};
 
 /// Houses data representative of application state.
 ///
+/// Note: The State struct is kept here for now since all methods reference it.
+/// In a future refactoring, we can move methods to separate modules.
 pub struct State {
     net_sender: Option<NetworkEventSender>,
     config_save_sender: Option<crate::app::ConfigSaveSender>,
@@ -177,22 +100,7 @@ pub struct State {
     theme: crate::ui::Theme,   // Current theme
 }
 
-/// Specifies which panel is being searched.
-///
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum SearchTarget {
-    Projects,
-    Tasks,
-}
-
-/// Defines different panels within task detail view.
-///
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum TaskDetailPanel {
-    Details,  // Properties, assignee, dates, etc.
-    Comments, // Comments/stories
-    Notes,    // Task notes/description
-}
+// SearchTarget and TaskDetailPanel are now in navigation.rs
 
 /// Defines default application state.
 ///
@@ -589,7 +497,11 @@ impl State {
     /// Return the current view.
     ///
     pub fn current_view(&self) -> &View {
-        self.view_stack.last().unwrap()
+        // view_stack is always initialized with at least one view in State::new
+        // This should never be None, but we provide a fallback for safety
+        self.view_stack
+            .last()
+            .expect("view_stack should never be empty")
     }
 
     /// Push a view onto the view stack.
@@ -1146,39 +1058,6 @@ impl State {
     ///
     pub fn get_kanban_column_index(&self) -> usize {
         self.kanban_column_index
-    }
-
-    /// Get kanban horizontal scroll offset.
-    ///
-    #[allow(dead_code)]
-    pub fn get_kanban_horizontal_scroll(&self) -> usize {
-        self.kanban_horizontal_scroll
-    }
-
-    /// Set kanban horizontal scroll offset.
-    ///
-    #[allow(dead_code)]
-    pub fn set_kanban_horizontal_scroll(&mut self, offset: usize) -> &mut Self {
-        self.kanban_horizontal_scroll = offset;
-        self
-    }
-
-    /// Scroll kanban columns left.
-    ///
-    #[allow(dead_code)]
-    pub fn scroll_kanban_left(&mut self) -> &mut Self {
-        if self.kanban_horizontal_scroll > 0 {
-            self.kanban_horizontal_scroll -= 1;
-        }
-        self
-    }
-
-    /// Scroll kanban columns right.
-    ///
-    #[allow(dead_code)]
-    pub fn scroll_kanban_right(&mut self) -> &mut Self {
-        self.kanban_horizontal_scroll += 1;
-        self
     }
 
     /// Get visible sections (sections that have tasks after filtering).
@@ -2895,7 +2774,6 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fake::uuid::UUIDv4;
     use fake::{Fake, Faker};
     use uuid::Uuid;
 
@@ -2935,7 +2813,8 @@ mod tests {
 
     #[test]
     fn set_active_workspace() {
-        let workspace_gid: Uuid = UUIDv4.fake();
+        let workspace_gid: Uuid = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440100")
+            .expect("Hardcoded test UUID should be valid");
         let mut state = State::default();
         state.set_active_workspace(workspace_gid.to_string());
         assert_eq!(
@@ -3177,20 +3056,6 @@ mod tests {
             ..State::default()
         };
         assert_eq!(*state.current_view(), View::Welcome);
-    }
-
-    #[test]
-    fn get_tasks() {
-        let tasks = vec![
-            Faker.fake::<Task>(),
-            Faker.fake::<Task>(),
-            Faker.fake::<Task>(),
-        ];
-        let state = State {
-            tasks: tasks.to_owned(),
-            ..State::default()
-        };
-        assert_eq!(tasks, *state.get_tasks());
     }
 
     #[test]

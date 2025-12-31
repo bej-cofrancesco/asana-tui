@@ -42,6 +42,84 @@ asana-tui
 asana-tui -c /path/to/config.yaml
 ```
 
+## Development
+
+### Prerequisites
+
+- Rust (latest stable version)
+- `rustfmt` and `clippy` (usually included with Rust)
+
+### Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/bej-cofrancesco/asana-tui.git
+cd asana-tui
+
+# Install pre-commit hooks (optional but recommended)
+make install-hooks
+# Or manually: pre-commit install
+```
+
+### Common Tasks
+
+```bash
+# Check code compiles
+make check
+# Or: cargo check --all-targets
+
+# Run tests
+make test
+# Or: cargo test --all-targets
+
+# Format code
+make fmt
+# Or: cargo fmt --all
+
+# Run linter
+make clippy
+# Or: cargo clippy --all-targets --all-features -- -D warnings
+
+# Run all CI checks locally
+make ci
+
+# Build release binary
+make build
+# Or: cargo build --release
+```
+
+### Pre-commit Hooks
+
+This project uses pre-commit hooks to ensure code quality. Install them with:
+
+```bash
+# Using pip
+pip install pre-commit
+pre-commit install
+
+# Or using the Makefile
+make install-hooks
+```
+
+The hooks will automatically:
+- Format code with `rustfmt`
+- Run `clippy` linter
+- Check code compiles
+- Run tests
+- Check file formatting (YAML, TOML, JSON)
+
+### CI/CD
+
+This project uses GitHub Actions for continuous integration. The CI pipeline:
+
+- ✅ Checks code compiles (`cargo check`)
+- ✅ Runs all tests (`cargo test`)
+- ✅ Checks code formatting (`cargo fmt --check`)
+- ✅ Runs clippy linter (`cargo clippy`)
+- ✅ Builds release binaries
+
+See `.github/workflows/ci.yml` for details.
+
 ## Configuration
 
 The application uses a YAML configuration file to store your Asana API token and other settings. The default location is platform-specific:
@@ -68,6 +146,12 @@ cargo test
 cargo doc --open
 ```
 
+### Documentation
+
+- **API Documentation**: See [docs/API.md](docs/API.md) for detailed API reference
+- **Rust Docs**: Run `cargo doc --open` to view generated Rust documentation
+- **Contributing**: See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
@@ -76,12 +160,41 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Benjamin Cofrancesco**
 
-- Email: benjamin@cofrancesco.com
+- Email: ben@enxystudio.com
 - GitHub: [@bej-cofrancesco](https://github.com/bej-cofrancesco)
+
+## Benchmarks
+
+Performance benchmarks are available for critical code paths:
+
+```bash
+# Run all benchmarks
+make bench
+# Or: cargo bench
+
+# Generate HTML report
+make bench-all
+```
+
+Benchmarks are located in the `benches/` directory and cover:
+- Custom field validation and building
+- Text processing utilities
 
 ## Contributing
 
 Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/bej-cofrancesco/asana-tui/issues).
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
+
+## Project Status
+
+✅ **Production Ready** - The project has been refactored and is ready for public use:
+- ✅ Comprehensive error handling
+- ✅ Well-organized module structure
+- ✅ Extensive test coverage
+- ✅ CI/CD pipeline
+- ✅ Complete documentation
+- ✅ Performance optimizations
 
 ---
 

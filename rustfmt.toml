@@ -1,0 +1,10 @@
+# Rustfmt configuration for consistent code formatting
+edition = "2021"
+max_width = 100
+tab_spaces = 4
+newline_style = "Unix"
+use_small_heuristics = "Default"
+use_field_init_shorthand = true
+remove_nested_parens = true
+reorder_imports = true
+reorder_modules = true

@@ -1,11 +1,17 @@
+//! Network event handling module.
+//!
+//! This module handles all network-related events, including Asana API interactions,
+//! task management, project operations, and data synchronization with the application state.
+
 use crate::asana::Asana;
+use crate::error::{AppError, AppResult};
 use crate::state::State;
-use anyhow::Result;
+use crate::utils::text_processing::replace_profile_urls;
 use log::*;
-use regex::Regex;
 use std::collections::HashMap;
+use std::error::Error;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 /// Specify different network event types.
 ///
@@ -69,26 +75,26 @@ pub enum Event {
 /// Specify struct for managing state with network events.
 ///
 pub struct Handler<'a> {
-    state: &'a Arc<Mutex<State>>,
+    state: &'a Arc<RwLock<State>>,
     asana: &'a mut Asana,
 }
 
 impl<'a> Handler<'a> {
     /// Return new instance with reference to state.
     ///
-    pub fn new(state: &'a Arc<Mutex<State>>, asana: &'a mut Asana) -> Self {
+    pub fn new(state: &'a Arc<RwLock<State>>, asana: &'a mut Asana) -> Self {
         Handler { state, asana }
     }
 
     /// Handle network events by type.
     ///
-    pub async fn handle(&mut self, event: Event) -> Result<()> {
+    pub async fn handle(&mut self, event: Event) -> AppResult<()> {
         debug!("Processing network event '{:?}'...", event);
         match event {
             Event::SetAccessToken { token } => {
                 // Clear any previous error
                 {
-                    let mut state = self.state.lock().await;
+                    let mut state = self.state.write().await;
                     state.clear_auth_error();
                 }
 
@@ -119,8 +125,8 @@ impl<'a> Handler<'a> {
                     // If we get here, authentication succeeded
                     // Update state to mark as authenticated
                     {
-                        let mut state = self.state.lock().await;
-                        state.set_access_token(token.clone());
+                        let mut state = self.state.write().await;
+                        state.set_access_token(token);
                         state.clear_access_token_input();
                         state.clear_auth_error();
                     }
@@ -138,7 +144,7 @@ impl<'a> Handler<'a> {
                     // Set error in state but keep has_access_token as false
                     // This allows user to see the error and resubmit
                     {
-                        let mut state = self.state.lock().await;
+                        let mut state = self.state.write().await;
                         state.set_auth_error(Some(error_msg));
                         // Don't set has_access_token to true on error
                         // Don't clear the input so user can edit and resubmit
@@ -217,22 +223,30 @@ impl<'a> Handler<'a> {
 
     /// Update state with user details and projects for active workspace.
     ///
-    async fn me(&mut self) -> Result<()> {
+    async fn me(&mut self) -> AppResult<()> {
         info!("Preparing initial application data...");
         info!("Fetching user details and available workspaces...");
-        let (user, workspaces) = self.asana.me().await?;
+        let (user, workspaces) = self
+            .asana
+            .me()
+            .await
+            .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())))?;
         {
-            let mut state = self.state.lock().await;
+            let mut state = self.state.write().await;
             state.set_user(user);
             if !workspaces.is_empty() {
-                state.set_workspaces(workspaces.to_owned());
-                state.set_active_workspace(workspaces[0].gid.to_owned());
+                state.set_workspaces(workspaces.clone());
+                state.set_active_workspace(workspaces[0].gid.clone());
             }
         }
         if !workspaces.is_empty() {
             info!("Fetching projects for active workspace...");
-            let projects = self.asana.projects(&workspaces[0].gid).await?;
-            let mut state = self.state.lock().await;
+            let projects = self
+                .asana
+                .projects(&workspaces[0].gid)
+                .await
+                .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())))?;
+            let mut state = self.state.write().await;
             state.set_projects(projects);
         }
         info!("Loaded initial application data.");
@@ -241,17 +255,19 @@ impl<'a> Handler<'a> {
 
     /// Update state with tasks for project.
     ///
-    async fn project_tasks(&mut self) -> Result<()> {
+    async fn project_tasks(&mut self) -> AppResult<()> {
         let project;
         let workspace_gid;
         {
-            let state = self.state.lock().await;
-            if state.get_project().is_none() {
-                warn!("Skipping tasks request for unset project.");
-                return Ok(());
-            }
-            project = state.get_project().unwrap().to_owned();
-            workspace_gid = state.get_active_workspace().map(|w| w.gid.to_owned());
+            let state = self.state.read().await;
+            project = match state.get_project() {
+                Some(p) => p.clone(),
+                None => {
+                    warn!("Skipping tasks request for unset project.");
+                    return Ok(());
+                }
+            };
+            workspace_gid = state.get_active_workspace().map(|w| w.gid.clone());
         }
         info!(
             "Fetching tasks for project '{}' (GID: {})...",
@@ -261,27 +277,30 @@ impl<'a> Handler<'a> {
         let include_completed = true;
         let view_mode;
         {
-            let state = self.state.lock().await;
+            let state = self.state.read().await;
             view_mode = state.get_view_mode();
         }
 
-        match self
+        let tasks_result = self
             .asana
             .tasks(&project.gid, workspace_gid.as_deref(), include_completed)
             .await
-        {
+            .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())));
+
+        match tasks_result {
             Ok(tasks) => {
                 info!(
                     "Received {} tasks for project '{}'.",
                     tasks.len(),
                     &project.name
                 );
-                let mut state = self.state.lock().await;
+                let mut state = self.state.write().await;
                 state.set_tasks(tasks);
                 // If in kanban mode, also load sections
                 if view_mode == crate::state::ViewMode::Kanban {
+                    let project_gid = project.gid.clone();
                     drop(state);
-                    self.get_project_sections(project.gid.clone()).await?;
+                    self.get_project_sections(project_gid).await?;
                 }
                 Ok(())
             }
@@ -303,51 +322,44 @@ impl<'a> Handler<'a> {
 
     /// Update state with tasks assigned to the user.
     ///
-    async fn update_task(&mut self, task_gid: String, completed: Option<bool>) -> Result<()> {
-        self.asana.update_task(&task_gid, completed).await?;
+    async fn update_task(&mut self, task_gid: String, completed: Option<bool>) -> AppResult<()> {
+        self.asana
+            .update_task(&task_gid, completed)
+            .await
+            .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())))?;
         info!("Task {} updated successfully.", task_gid);
         // Refresh the current task list
-        let view;
-        {
-            let state = self.state.lock().await;
-            view = state.current_view().clone();
-        }
-        match view {
-            crate::state::View::ProjectTasks => {
-                self.project_tasks().await?;
-            }
-            _ => {}
-        }
+        self.refresh_current_view().await?;
         Ok(())
     }
 
     /// Delete a task.
     ///
-    async fn delete_task(&mut self, task_gid: String) -> Result<()> {
+    async fn delete_task(&mut self, task_gid: String) -> AppResult<()> {
         info!("Deleting task {}...", task_gid);
-        self.asana.delete_task(&task_gid).await?;
+        self.asana
+            .delete_task(&task_gid)
+            .await
+            .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())))?;
         info!("Task {} deleted successfully.", task_gid);
         // Refresh the current task list
-        let view;
-        {
-            let state = self.state.lock().await;
-            view = state.current_view().clone();
-        }
-        match view {
-            crate::state::View::ProjectTasks => {
-                self.project_tasks().await?;
-            }
-            _ => {}
-        }
+        self.refresh_current_view().await?;
         Ok(())
     }
 
     /// Refresh the current task list.
     ///
-    async fn refresh_tasks(&mut self) -> Result<()> {
+    async fn refresh_tasks(&mut self) -> AppResult<()> {
+        self.refresh_current_view().await?;
+        Ok(())
+    }
+
+    /// Refresh the current view if it's ProjectTasks.
+    ///
+    async fn refresh_current_view(&mut self) -> AppResult<()> {
         let view;
         {
-            let state = self.state.lock().await;
+            let state = self.state.read().await;
             view = state.current_view().clone();
         }
         match view {
@@ -361,57 +373,67 @@ impl<'a> Handler<'a> {
 
     /// Get full task details.
     ///
-    async fn get_task_detail(&mut self, task_gid: String) -> Result<()> {
+    async fn get_task_detail(&mut self, task_gid: String) -> AppResult<()> {
         info!("Fetching full details for task {}...", task_gid);
-        let mut task = self.asana.get_task(&task_gid).await?;
+        let mut task = self
+            .asana
+            .get_task(&task_gid)
+            .await
+            .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())))?;
 
         // Process task notes - replace profile URLs with @username when data comes from API
-        let state = self.state.lock().await;
-        let users = state.get_workspace_users();
-        let user_map: HashMap<String, String> = users
-            .iter()
-            .map(|u| (u.gid.clone(), u.name.clone()))
-            .collect();
-        drop(state);
+        let user_map: HashMap<String, String> = {
+            let state = self.state.read().await;
+            state
+                .get_workspace_users()
+                .iter()
+                .map(|u| (u.gid.clone(), u.name.clone()))
+                .collect()
+        };
 
         // Process notes if present
         if let Some(ref mut notes) = task.notes {
-            *notes = Self::replace_profile_urls(notes, &user_map);
+            *notes = replace_profile_urls(notes, &user_map);
         }
 
-        let task_gid_clone = task_gid.clone();
         let (workspace_gid, project_gid) = {
-            let state = self.state.lock().await;
+            let state = self.state.read().await;
             (
                 state.get_active_workspace().map(|w| w.gid.clone()),
                 state.get_project().map(|p| p.gid.clone()),
             )
         };
-        let mut state = self.state.lock().await;
-        state.set_task_detail(task);
-        drop(state);
+        {
+            let mut state = self.state.write().await;
+            state.set_task_detail(task);
+        }
 
         // Fetch assignees, sections, and custom fields on the fly
         if let Some(workspace_gid) = workspace_gid {
             self.get_workspace_users(workspace_gid).await?;
         }
         if let Some(project_gid) = project_gid {
-            self.get_project_sections(project_gid.clone()).await?;
+            let project_gid_clone = project_gid.clone();
+            self.get_project_sections(project_gid_clone).await?;
             self.get_project_custom_fields(project_gid).await?;
         }
 
         // Also load stories/comments (which will also be processed)
-        self.get_task_stories(task_gid_clone).await?;
+        self.get_task_stories(task_gid).await?;
         info!("Task details loaded successfully.");
         Ok(())
     }
 
     /// Get project sections for kanban board.
     ///
-    async fn get_project_sections(&mut self, project_gid: String) -> Result<()> {
+    async fn get_project_sections(&mut self, project_gid: String) -> AppResult<()> {
         info!("Fetching sections for project {}...", project_gid);
-        let sections = self.asana.get_project_sections(&project_gid).await?;
-        let mut state = self.state.lock().await;
+        let sections = self
+            .asana
+            .get_project_sections(&project_gid)
+            .await
+            .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())))?;
+        let mut state = self.state.write().await;
         state.set_sections(sections);
         info!("Sections loaded successfully.");
         Ok(())
@@ -419,12 +441,16 @@ impl<'a> Handler<'a> {
 
     /// Get custom fields for a project.
     ///
-    async fn get_project_custom_fields(&mut self, project_gid: String) -> Result<()> {
+    async fn get_project_custom_fields(&mut self, project_gid: String) -> AppResult<()> {
         info!("Fetching custom fields for project {}...", project_gid);
-        let custom_fields = self.asana.get_project_custom_fields(&project_gid).await?;
+        let custom_fields = self
+            .asana
+            .get_project_custom_fields(&project_gid)
+            .await
+            .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())))?;
 
         {
-            let mut state = self.state.lock().await;
+            let mut state = self.state.write().await;
             state.set_project_custom_fields(custom_fields);
         }
 
@@ -432,69 +458,49 @@ impl<'a> Handler<'a> {
         Ok(())
     }
 
-    /// Replace profile URLs with "@ person name" in text.
-    /// URLs like "profiles/123456" or "https://app.asana.com/0/profile/123456" become "@ person name"
-    fn replace_profile_urls(text: &str, user_map: &HashMap<String, String>) -> String {
-        // Pattern: https://app.asana.com/0/profile/{gid} or profiles/{gid}
-        let profile_patterns = vec![
-            r"https://app\.asana\.com/0/profile/(\d+)",
-            r"profiles/(\d+)",
-        ];
-
-        let mut result = text.to_string();
-        for pattern in profile_patterns {
-            let re = Regex::new(pattern).unwrap();
-            result = re
-                .replace_all(&result, |caps: &regex::Captures| {
-                    if let Some(gid) = caps.get(1) {
-                        // Extract user ID from URL (split by / and take last part)
-                        let user_id = gid.as_str();
-                        if let Some(user_name) = user_map.get(user_id) {
-                            format!("@ {}", user_name)
-                        } else {
-                            // Keep original if user not found
-                            caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string()
-                        }
-                    } else {
-                        caps.get(0).map(|m| m.as_str()).unwrap_or("").to_string()
-                    }
-                })
-                .to_string();
-        }
-        result
-    }
+    // replace_profile_urls is now in utils::text_processing
 
     /// Get task stories/comments.
     ///
-    async fn get_task_stories(&mut self, task_gid: String) -> Result<()> {
+    async fn get_task_stories(&mut self, task_gid: String) -> AppResult<()> {
         info!("Fetching stories/comments for task {}...", task_gid);
-        let mut stories = self.asana.get_task_stories(&task_gid).await?;
+        let mut stories = self
+            .asana
+            .get_task_stories(&task_gid)
+            .await
+            .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())))?;
 
         // Process URLs when data comes from API - replace profile URLs with @username
-        let state = self.state.lock().await;
-        let users = state.get_workspace_users();
-        let user_map: HashMap<String, String> = users
-            .iter()
-            .map(|u| (u.gid.clone(), u.name.clone()))
-            .collect();
-        drop(state);
+        let user_map: HashMap<String, String> = {
+            let state = self.state.read().await;
+            state
+                .get_workspace_users()
+                .iter()
+                .map(|u| (u.gid.clone(), u.name.clone()))
+                .collect()
+        };
 
         // Process each story's text to replace profile URLs
         for story in &mut stories {
-            story.text = Self::replace_profile_urls(&story.text, &user_map);
+            story.text = replace_profile_urls(&story.text, &user_map);
         }
 
-        let mut state = self.state.lock().await;
-        state.set_task_stories(stories);
+        {
+            let mut state = self.state.write().await;
+            state.set_task_stories(stories);
+        }
         info!("Stories/comments loaded successfully.");
         Ok(())
     }
 
     /// Create a story/comment on a task.
     ///
-    async fn create_story(&mut self, task_gid: String, text: String) -> Result<()> {
+    async fn create_story(&mut self, task_gid: String, text: String) -> AppResult<()> {
         info!("Creating comment on task {}...", task_gid);
-        self.asana.create_story(&task_gid, &text).await?;
+        self.asana
+            .create_story(&task_gid, &text)
+            .await
+            .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())))?;
         // Refresh stories after creating
         self.get_task_stories(task_gid).await?;
         info!("Comment created successfully.");
@@ -503,10 +509,14 @@ impl<'a> Handler<'a> {
 
     /// Get workspace users.
     ///
-    async fn get_workspace_users(&mut self, workspace_gid: String) -> Result<()> {
+    async fn get_workspace_users(&mut self, workspace_gid: String) -> AppResult<()> {
         info!("Fetching users for workspace {}...", workspace_gid);
-        let users = self.asana.get_workspace_users(&workspace_gid).await?;
-        let mut state = self.state.lock().await;
+        let users = self
+            .asana
+            .get_workspace_users(&workspace_gid)
+            .await
+            .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())))?;
+        let mut state = self.state.write().await;
         state.set_workspace_users(users);
         info!("Users loaded successfully.");
         Ok(())
@@ -523,7 +533,7 @@ impl<'a> Handler<'a> {
         due_on: Option<String>,
         section: Option<String>,
         custom_fields: HashMap<String, crate::state::CustomFieldValue>,
-    ) -> Result<()> {
+    ) -> AppResult<()> {
         info!("Creating new task '{}' in project {}...", name, project_gid);
         let task = self
             .asana
@@ -536,7 +546,8 @@ impl<'a> Handler<'a> {
                 section.as_deref(),
                 &custom_fields,
             )
-            .await?;
+            .await
+            .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())))?;
 
         info!(
             "Task '{}' created successfully with GID {}",
@@ -544,27 +555,24 @@ impl<'a> Handler<'a> {
         );
 
         // Refresh tasks after creating - need to get project from state
-        let project_gid_for_refresh;
-        {
-            let state = self.state.lock().await;
-            if let Some(project) = state.get_project() {
-                project_gid_for_refresh = project.gid.clone();
-            } else {
-                // If no project in state, use the one from the create request
-                project_gid_for_refresh = project_gid.clone();
-            }
-        }
+        let project_gid_for_refresh = {
+            let state = self.state.read().await;
+            state
+                .get_project()
+                .map(|p| p.gid.clone())
+                .unwrap_or_else(|| project_gid.clone())
+        };
 
         // Refresh the project tasks
         self.project_tasks().await?;
 
         // If in kanban mode, also refresh sections
-        {
-            let state = self.state.lock().await;
-            if state.get_view_mode() == crate::state::ViewMode::Kanban {
-                drop(state);
-                self.get_project_sections(project_gid_for_refresh).await?;
-            }
+        let should_refresh_sections = {
+            let state = self.state.read().await;
+            state.get_view_mode() == crate::state::ViewMode::Kanban
+        };
+        if should_refresh_sections {
+            self.get_project_sections(project_gid_for_refresh).await?;
         }
 
         Ok(())
@@ -582,7 +590,7 @@ impl<'a> Handler<'a> {
         section: Option<String>,
         completed: Option<bool>,
         custom_fields: HashMap<String, crate::state::CustomFieldValue>,
-    ) -> Result<()> {
+    ) -> AppResult<()> {
         self.asana
             .update_task_fields(
                 &gid,
@@ -594,23 +602,19 @@ impl<'a> Handler<'a> {
                 completed,
                 &custom_fields,
             )
-            .await?;
+            .await
+            .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())))?;
         // Refresh task detail if we're viewing it
-        let view;
-        let task_gid_to_refresh;
-        {
-            let state = self.state.lock().await;
-            view = state.current_view().clone();
-            if matches!(view, crate::state::View::TaskDetail) {
-                if let Some(task) = state.get_task_detail() {
-                    task_gid_to_refresh = Some(task.gid.clone());
-                } else {
-                    task_gid_to_refresh = None;
-                }
+        let (view, task_gid_to_refresh) = {
+            let state = self.state.read().await;
+            let view = state.current_view().clone();
+            let task_gid_to_refresh = if matches!(view, crate::state::View::TaskDetail) {
+                state.get_task_detail().map(|t| t.gid.clone())
             } else {
-                task_gid_to_refresh = None;
-            }
-        }
+                None
+            };
+            (view, task_gid_to_refresh)
+        };
         if let Some(gid) = task_gid_to_refresh {
             self.get_task_detail(gid).await?;
             return Ok(());
@@ -625,10 +629,15 @@ impl<'a> Handler<'a> {
 
     /// Move task to a different section.
     ///
-    async fn move_task_to_section(&mut self, task_gid: String, section_gid: String) -> Result<()> {
+    async fn move_task_to_section(
+        &mut self,
+        task_gid: String,
+        section_gid: String,
+    ) -> AppResult<()> {
         self.asana
             .add_task_to_section(&task_gid, &section_gid)
-            .await?;
+            .await
+            .map_err(|e| AppError::Asana(crate::asana::AsanaError::Other(e.to_string())))?;
         // Refresh tasks after moving
         self.project_tasks().await?;
         info!("Task moved successfully.");

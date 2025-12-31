@@ -1,3 +1,8 @@
+//! Theme management module.
+//!
+//! This module defines the theme system for the application, including color palettes,
+//! theme presets, and theme loading/saving functionality.
+
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 
