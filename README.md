@@ -56,57 +56,24 @@ asana-tui -c /path/to/config.yaml
 git clone https://github.com/bej-cofrancesco/asana-tui.git
 cd asana-tui
 
-# Install pre-commit hooks (optional but recommended)
-make install-hooks
-# Or manually: pre-commit install
-```
-
 ### Common Tasks
 
 ```bash
 # Check code compiles
-make check
-# Or: cargo check --all-targets
+cargo check --all-targets
 
 # Run tests
-make test
-# Or: cargo test --all-targets
+cargo test --all-targets
 
 # Format code
-make fmt
-# Or: cargo fmt --all
+cargo fmt --all
 
 # Run linter
-make clippy
-# Or: cargo clippy --all-targets --all-features -- -D warnings
-
-# Run all CI checks locally
-make ci
+cargo clippy --all-targets --all-features -- -D warnings
 
 # Build release binary
-make build
-# Or: cargo build --release
+cargo build --release
 ```
-
-### Pre-commit Hooks
-
-This project uses pre-commit hooks to ensure code quality. Install them with:
-
-```bash
-# Using pip
-pip install pre-commit
-pre-commit install
-
-# Or using the Makefile
-make install-hooks
-```
-
-The hooks will automatically:
-- Format code with `rustfmt`
-- Run `clippy` linter
-- Check code compiles
-- Run tests
-- Check file formatting (YAML, TOML, JSON)
 
 ### CI/CD
 
@@ -133,22 +100,8 @@ The application uses a YAML configuration file to store your Asana API token and
 api_token: your_asana_api_token_here
 ```
 
-## Development
-
-```bash
-# Run in development mode
-cargo run
-
-# Run tests
-cargo test
-
-# Build documentation
-cargo doc --open
-```
-
 ### Documentation
 
-- **API Documentation**: See [docs/API.md](docs/API.md) for detailed API reference
 - **Rust Docs**: Run `cargo doc --open` to view generated Rust documentation
 - **Contributing**: See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines
 
@@ -169,11 +122,7 @@ Performance benchmarks are available for critical code paths:
 
 ```bash
 # Run all benchmarks
-make bench
-# Or: cargo bench
-
-# Generate HTML report
-make bench-all
+cargo bench
 ```
 
 Benchmarks are located in the `benches/` directory and cover:
@@ -185,16 +134,6 @@ Benchmarks are located in the `benches/` directory and cover:
 Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/bej-cofrancesco/asana-tui/issues).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
-
-## Project Status
-
-✅ **Production Ready** - The project has been refactored and is ready for public use:
-- ✅ Comprehensive error handling
-- ✅ Well-organized module structure
-- ✅ Extensive test coverage
-- ✅ CI/CD pipeline
-- ✅ Complete documentation
-- ✅ Performance optimizations
 
 ---
 
