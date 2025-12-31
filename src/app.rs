@@ -20,7 +20,10 @@ use ratatui::{
     Terminal,
 };
 use std::io::{self, stdout};
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use tokio::sync::RwLock;
 use tui_logger::{init_logger, set_default_level};
 
@@ -133,32 +136,32 @@ impl App {
 
         // Create shutdown flag for graceful shutdown
         let shutdown = Arc::new(AtomicBool::new(false));
-        
+
         // Always start network thread - it will handle SetAccessToken event
         // Use actual token if available, or empty string as placeholder
         let initial_token = app.access_token.clone().unwrap_or_default();
         app.start_network_with_token(rx, initial_token, shutdown.clone())?;
 
         app.start_config_saver(config_save_rx, shutdown.clone());
-        
+
         // Store senders so we can drop them on exit to signal shutdown to background tasks
         let network_sender = tx.clone();
         let config_save_sender = config_save_tx.clone();
-        
+
         let result = app.start_ui(tx).await;
-        
+
         // Signal shutdown to all background tasks
         shutdown.store(true, Ordering::Relaxed);
-        
+
         // Drop senders to signal background tasks to exit
         // This will cause receivers to return errors and exit their loops
         drop(network_sender);
         drop(config_save_sender);
         drop(log_tx_for_shutdown); // Also close log channel
-        
+
         // Give background tasks a moment to exit gracefully
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-        
+
         result?;
 
         // Save config on exit
@@ -173,7 +176,7 @@ impl App {
         }
 
         info!("Exiting application...");
-        
+
         std::process::exit(0);
     }
 
@@ -189,7 +192,7 @@ impl App {
                     debug!("Config saver received shutdown signal");
                     break;
                 }
-                
+
                 match receiver.recv_timeout(std::time::Duration::from_millis(100)) {
                     Ok(_) => {
                         if let Ok(state_guard) = state.try_read() {
@@ -240,7 +243,7 @@ impl App {
                             debug!("Network receiver received shutdown signal");
                             break;
                         }
-                        
+
                         match net_receiver.recv_timeout(std::time::Duration::from_millis(100)) {
                             Ok(event) => {
                                 if async_tx_for_receiver.send(event).is_err() {
@@ -269,7 +272,7 @@ impl App {
                         debug!("Network processor received shutdown signal");
                         break;
                     }
-                    
+
                     tokio::select! {
                         event = async_rx.recv() => {
                             match event {
