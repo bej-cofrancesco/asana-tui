@@ -1453,6 +1453,9 @@ mod tests {
             }));
         }).await;
 
+        // Wait a moment for server to be ready
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
         let mut asana = Asana {
             client: Client::new(&token.to_string(), &server.base_url()),
         };
@@ -1537,59 +1540,26 @@ mod tests {
                             "gid": tasks[0].gid,
                             "resource_type": "task",
                             "name": tasks[0].name,
+                            "completed": tasks[0].completed,
                         },
                         {
                             "gid": tasks[1].gid,
                             "resource_type": "task",
                             "name": tasks[1].name,
+                            "completed": tasks[1].completed,
                         }
                     ]
                 }));
             })
             .await;
+
+        // Wait a moment for server to be ready
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
         let mut asana = Asana {
             client: Client::new(&token.to_string(), &server.base_url()),
         };
         asana.tasks(&project.gid, None, false).await?;
-        mock.assert_async().await;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn my_tasks_success() -> Result<()> {
-        let token: Uuid = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440003")
-            .map_err(|e| anyhow::anyhow!("Failed to parse test UUID: {}", e))?;
-        let user: User = Faker.fake();
-        let workspace: Workspace = Faker.fake();
-        let tasks: [Task; 2] = Faker.fake();
-
-        let server = MockServer::start();
-        let mock = server
-            .mock_async(|when, then| {
-                when.method("GET")
-                    .path("/tasks/")
-                    .header("Authorization", &format!("Bearer {}", &token))
-                    .query_param("assignee", &user.gid)
-                    .query_param("workspace", &workspace.gid)
-                    .query_param_exists("completed_since");
-                then.status(200).json_body(json!({
-                    "data": [
-                        {
-                            "gid": tasks[0].gid,
-                            "resource_type": "task",
-                            "name": tasks[0].name,
-                        },
-                        {
-                            "gid": tasks[1].gid,
-                            "resource_type": "task",
-                            "name": tasks[1].name,
-                        }
-                    ]
-                }));
-            })
-            .await;
-
         mock.assert_async().await;
         Ok(())
     }

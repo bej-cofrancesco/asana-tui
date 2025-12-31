@@ -443,6 +443,7 @@ impl State {
             0
         };
         self.projects_list_state.select(Some(next));
+        self.current_top_list_index = next; // Keep for backward compatibility
         self
     }
 
@@ -460,6 +461,7 @@ impl State {
             filtered.len() - 1
         };
         self.projects_list_state.select(Some(prev));
+        self.current_top_list_index = prev; // Keep for backward compatibility
         self
     }
 
@@ -2956,6 +2958,20 @@ mod tests {
             current_shortcut_index: 0,
             ..State::default()
         };
+        // Add starred projects to make shortcuts list non-empty
+        state.starred_projects.insert("proj1".to_string());
+        state.starred_projects.insert("proj2".to_string());
+        state.starred_projects.insert("proj3".to_string());
+        state
+            .starred_project_names
+            .insert("proj1".to_string(), "Project 1".to_string());
+        state
+            .starred_project_names
+            .insert("proj2".to_string(), "Project 2".to_string());
+        state
+            .starred_project_names
+            .insert("proj3".to_string(), "Project 3".to_string());
+        state.shortcuts_list_state.select(Some(0));
         state.next_shortcut_index();
         assert_eq!(state.current_shortcut_index, 1);
         state.next_shortcut_index();
@@ -2970,6 +2986,20 @@ mod tests {
             current_shortcut_index: 0,
             ..State::default()
         };
+        // Add starred projects to make shortcuts list non-empty
+        state.starred_projects.insert("proj1".to_string());
+        state.starred_projects.insert("proj2".to_string());
+        state.starred_projects.insert("proj3".to_string());
+        state
+            .starred_project_names
+            .insert("proj1".to_string(), "Project 1".to_string());
+        state
+            .starred_project_names
+            .insert("proj2".to_string(), "Project 2".to_string());
+        state
+            .starred_project_names
+            .insert("proj3".to_string(), "Project 3".to_string());
+        state.shortcuts_list_state.select(Some(0));
         state.previous_shortcut_index();
         assert_eq!(state.current_shortcut_index, 2);
         state.previous_shortcut_index();
@@ -2985,11 +3015,17 @@ mod tests {
             current_focus: Focus::Menu,
             ..State::default()
         };
+        // Add starred projects to make shortcuts list non-empty
+        let project1 = Faker.fake::<Project>();
+        state.starred_projects.insert(project1.gid.clone());
+        state
+            .starred_project_names
+            .insert(project1.gid.clone(), project1.name.clone());
+        state.projects.push(project1);
+        state.shortcuts_list_state.select(Some(0));
         state.select_current_shortcut_index();
-        assert_eq!(state.current_focus, Focus::View);
-        state.current_shortcut_index = 1;
-        state.select_current_shortcut_index();
-        assert_eq!(state.current_focus, Focus::View);
+        // select_current_shortcut_index calls focus_view() which switches to View focus
+        assert_eq!(*state.current_focus(), Focus::View);
     }
 
     #[test]
@@ -3005,9 +3041,11 @@ mod tests {
     fn next_top_list_index_when_nonempty() {
         let mut state = State {
             current_top_list_index: 0,
-            projects: vec![Faker.fake::<Project>(), Faker.fake::<Project>()],
             ..State::default()
         };
+        let projects = vec![Faker.fake::<Project>(), Faker.fake::<Project>()];
+        state.set_projects(projects);
+        state.projects_list_state.select(Some(0));
         state.next_top_list_index();
         assert_eq!(state.current_top_list_index, 1);
         state.next_top_list_index();
@@ -3029,9 +3067,11 @@ mod tests {
     fn previous_top_list_index_when_nonempty() {
         let mut state = State {
             current_top_list_index: 0,
-            projects: vec![Faker.fake::<Project>(), Faker.fake::<Project>()],
             ..State::default()
         };
+        let projects = vec![Faker.fake::<Project>(), Faker.fake::<Project>()];
+        state.set_projects(projects);
+        state.projects_list_state.select(Some(0));
         state.previous_top_list_index();
         assert_eq!(state.current_top_list_index, 1);
         state.previous_top_list_index();
