@@ -50,9 +50,22 @@ pub fn render_hotkey_editor(frame: &mut Frame, size: Rect, state: &State) {
     // Title block
     let theme = state.get_theme();
     let instructions = if state.get_hotkey_editor_selected_action().is_some() {
-        " Press a key to bind, Esc: cancel"
+        // When editing, show cancel instruction
+        if let Some(cancel_hotkey) = state
+            .get_hotkeys()
+            .welcome
+            .get(&crate::config::hotkeys::HotkeyAction::Cancel)
+        {
+            format!(
+                " Press a key to bind, {}: cancel",
+                crate::config::hotkeys::format_hotkey_display(cancel_hotkey)
+            )
+        } else {
+            " Press a key to bind, Esc: cancel".to_string()
+        }
     } else {
-        " j/k: navigate, Enter: edit, Esc: close"
+        // When browsing, show navigation instructions
+        crate::config::hotkeys::build_hotkey_editor_instructions(state.get_hotkeys())
     };
 
     let title_block = Block::default()
@@ -169,10 +182,10 @@ pub fn render_hotkey_editor(frame: &mut Frame, size: Rect, state: &State) {
 ///
 fn format_action_name(action: &HotkeyAction) -> String {
     match action {
-        HotkeyAction::NavigateMenuNext => "Navigate Menu Next".to_string(),
-        HotkeyAction::NavigateMenuPrev => "Navigate Menu Prev".to_string(),
-        HotkeyAction::NavigateMenuLeft => "Navigate Menu Left".to_string(),
-        HotkeyAction::NavigateMenuRight => "Navigate Menu Right".to_string(),
+        HotkeyAction::NavigateNext => "Navigate Next".to_string(),
+        HotkeyAction::NavigatePrev => "Navigate Prev".to_string(),
+        HotkeyAction::NavigateLeft => "Navigate Left".to_string(),
+        HotkeyAction::NavigateRight => "Navigate Right".to_string(),
         HotkeyAction::ToggleStar => "Toggle Star".to_string(),
         HotkeyAction::EnterSearch => "Enter Search".to_string(),
         HotkeyAction::EnterDebug => "Enter Debug".to_string(),
@@ -181,38 +194,22 @@ fn format_action_name(action: &HotkeyAction) -> String {
         HotkeyAction::Quit => "Quit".to_string(),
         HotkeyAction::OpenThemeSelector => "Open Theme Selector".to_string(),
         HotkeyAction::OpenHotkeyEditor => "Open Hotkey Editor".to_string(),
-        HotkeyAction::NavigateTaskNext => "Navigate Task Next".to_string(),
-        HotkeyAction::NavigateTaskPrev => "Navigate Task Prev".to_string(),
-        HotkeyAction::NavigateColumnNext => "Navigate Column Next".to_string(),
-        HotkeyAction::NavigateColumnPrev => "Navigate Column Prev".to_string(),
         HotkeyAction::ViewTask => "View Task".to_string(),
         HotkeyAction::CreateTask => "Create Task".to_string(),
         HotkeyAction::MoveTask => "Move Task".to_string(),
         HotkeyAction::ToggleTaskComplete => "Toggle Task Complete".to_string(),
         HotkeyAction::DeleteTask => "Delete Task".to_string(),
         HotkeyAction::Back => "Back".to_string(),
-        HotkeyAction::SwitchPanelNext => "Switch Panel Next".to_string(),
-        HotkeyAction::SwitchPanelPrev => "Switch Panel Prev".to_string(),
-        HotkeyAction::ScrollDown => "Scroll Down".to_string(),
-        HotkeyAction::ScrollUp => "Scroll Up".to_string(),
         HotkeyAction::EditTask => "Edit Task".to_string(),
         HotkeyAction::AddComment => "Add Comment".to_string(),
-        HotkeyAction::NavigateFieldNext => "Navigate Field Next".to_string(),
-        HotkeyAction::NavigateFieldPrev => "Navigate Field Prev".to_string(),
         HotkeyAction::EditField => "Edit Field".to_string(),
         HotkeyAction::SubmitForm => "Submit Form".to_string(),
         HotkeyAction::SearchModeExit => "Search Mode Exit".to_string(),
-        HotkeyAction::DebugModeNavigateNext => "Debug Mode Navigate Next".to_string(),
-        HotkeyAction::DebugModeNavigatePrev => "Debug Mode Navigate Prev".to_string(),
         HotkeyAction::DebugModeCopyLog => "Debug Mode Copy Log".to_string(),
         HotkeyAction::DebugModeExit => "Debug Mode Exit".to_string(),
         HotkeyAction::DeleteConfirm => "Delete Confirm".to_string(),
-        HotkeyAction::MoveTaskNavigateNext => "Move Task Navigate Next".to_string(),
-        HotkeyAction::MoveTaskNavigatePrev => "Move Task Navigate Prev".to_string(),
         HotkeyAction::MoveTaskConfirm => "Move Task Confirm".to_string(),
         HotkeyAction::MoveTaskCancel => "Move Task Cancel".to_string(),
-        HotkeyAction::ThemeSelectorNavigateNext => "Theme Selector Navigate Next".to_string(),
-        HotkeyAction::ThemeSelectorNavigatePrev => "Theme Selector Navigate Prev".to_string(),
         HotkeyAction::ThemeSelectorSelect => "Theme Selector Select".to_string(),
         HotkeyAction::ThemeSelectorCancel => "Theme Selector Cancel".to_string(),
     }

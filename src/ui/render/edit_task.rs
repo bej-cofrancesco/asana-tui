@@ -741,13 +741,15 @@ fn render_people_dropdown(
         })
         .collect();
 
+    let instructions = crate::config::hotkeys::build_custom_field_instructions(state.get_hotkeys());
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(
-            "{} ({} results, {} selected, j/k to navigate, Enter to toggle)",
+            "{} ({} results, {} selected, {})",
             cf.name,
             filtered.len(),
-            selected_gids.len()
+            selected_gids.len(),
+            instructions
         ))
         .border_style(styling::active_block_border_style(state.get_theme()));
 

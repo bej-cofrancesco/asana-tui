@@ -1,6 +1,7 @@
 use super::hotkey_editor;
 use super::welcome;
 use super::{create_task, edit_task, kanban, task_detail, Frame};
+use crate::config::hotkeys::build_move_task_instructions;
 use crate::state::{State, View};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
@@ -173,7 +174,8 @@ fn render_move_task_modal(frame: &mut Frame, size: Rect, _task_name: &str, state
         ))
         .border_style(styling::active_block_border_style(theme));
 
-    let title_text = Paragraph::new("j/k: navigate, Enter: select, Esc: cancel")
+    let instructions = build_move_task_instructions(state.get_hotkeys());
+    let title_text = Paragraph::new(instructions)
         .block(title_block)
         .alignment(Alignment::Center);
     frame.render_widget(title_text, chunks[0]);

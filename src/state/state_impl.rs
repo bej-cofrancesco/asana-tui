@@ -2318,6 +2318,7 @@ impl State {
 
     /// Scroll form up (show earlier fields).
     ///
+    #[allow(dead_code)]
     pub fn scroll_form_up(&mut self) -> &mut Self {
         if self.form_scroll_offset > 0 {
             self.form_scroll_offset -= 1;

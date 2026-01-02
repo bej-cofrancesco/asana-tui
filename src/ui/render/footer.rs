@@ -25,14 +25,14 @@ fn format_hotkeys_for_view(view: &crate::state::View, state: &State) -> String {
             view_hotkeys,
             &[
                 (
-                    HotkeyAction::SwitchPanelPrev,
+                    HotkeyAction::NavigateLeft,
                     "switch panel",
-                    Some(HotkeyAction::SwitchPanelNext),
+                    Some(HotkeyAction::NavigateRight),
                 ),
                 (
-                    HotkeyAction::ScrollDown,
+                    HotkeyAction::NavigateNext,
                     "scroll",
-                    Some(HotkeyAction::ScrollUp),
+                    Some(HotkeyAction::NavigatePrev),
                 ),
                 (HotkeyAction::EditTask, "edit", None),
                 (HotkeyAction::DeleteTask, "delete", None),
@@ -49,9 +49,9 @@ fn format_hotkeys_for_view(view: &crate::state::View, state: &State) -> String {
                     view_hotkeys,
                     &[
                         (
-                            HotkeyAction::NavigateFieldNext,
+                            HotkeyAction::NavigateNext,
                             "navigate fields",
-                            Some(HotkeyAction::NavigateFieldPrev),
+                            Some(HotkeyAction::NavigatePrev),
                         ),
                         (HotkeyAction::EditField, "edit field", None),
                         (HotkeyAction::SubmitForm, "submit", None),
@@ -64,14 +64,14 @@ fn format_hotkeys_for_view(view: &crate::state::View, state: &State) -> String {
             view_hotkeys,
             &[
                 (
-                    HotkeyAction::NavigateTaskNext,
+                    HotkeyAction::NavigateNext,
                     "navigate tasks",
-                    Some(HotkeyAction::NavigateTaskPrev),
+                    Some(HotkeyAction::NavigatePrev),
                 ),
                 (
-                    HotkeyAction::NavigateColumnPrev,
+                    HotkeyAction::NavigateLeft,
                     "navigate columns (auto-scroll)",
-                    Some(HotkeyAction::NavigateColumnNext),
+                    Some(HotkeyAction::NavigateRight),
                 ),
                 (HotkeyAction::ViewTask, "view", None),
                 (HotkeyAction::CreateTask, "create", None),
@@ -84,10 +84,10 @@ fn format_hotkeys_for_view(view: &crate::state::View, state: &State) -> String {
         crate::state::View::Welcome => {
             // For Welcome view, we need special handling for the 4-key navigation display
             let mut parts = Vec::new();
-            if let Some(j) = view_hotkeys.get(&HotkeyAction::NavigateMenuNext) {
-                if let Some(k) = view_hotkeys.get(&HotkeyAction::NavigateMenuPrev) {
-                    if let Some(h) = view_hotkeys.get(&HotkeyAction::NavigateMenuLeft) {
-                        if let Some(l) = view_hotkeys.get(&HotkeyAction::NavigateMenuRight) {
+            if let Some(j) = view_hotkeys.get(&HotkeyAction::NavigateNext) {
+                if let Some(k) = view_hotkeys.get(&HotkeyAction::NavigatePrev) {
+                    if let Some(h) = view_hotkeys.get(&HotkeyAction::NavigateLeft) {
+                        if let Some(l) = view_hotkeys.get(&HotkeyAction::NavigateRight) {
                             parts.push(format!(
                                 "{} {} {} {}: navigate",
                                 format_hotkey_display(j),
@@ -146,9 +146,9 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
             &hotkeys.debug_mode,
             &[
                 (
-                    HotkeyAction::DebugModeNavigateNext,
+                    HotkeyAction::NavigateNext,
                     "navigate logs",
-                    Some(HotkeyAction::DebugModeNavigatePrev),
+                    Some(HotkeyAction::NavigatePrev),
                 ),
                 (HotkeyAction::DebugModeCopyLog, "copy log", None),
                 (
@@ -171,9 +171,9 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
             &hotkeys.move_task,
             &[
                 (
-                    HotkeyAction::MoveTaskNavigateNext,
+                    HotkeyAction::NavigateNext,
                     "navigate sections",
-                    Some(HotkeyAction::MoveTaskNavigatePrev),
+                    Some(HotkeyAction::NavigatePrev),
                 ),
                 (HotkeyAction::MoveTaskConfirm, "move task", None),
                 (HotkeyAction::MoveTaskCancel, "cancel", None),
@@ -184,9 +184,9 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
             &hotkeys.theme_selector,
             &[
                 (
-                    HotkeyAction::ThemeSelectorNavigateNext,
+                    HotkeyAction::NavigateNext,
                     "navigate themes",
-                    Some(HotkeyAction::ThemeSelectorNavigatePrev),
+                    Some(HotkeyAction::NavigatePrev),
                 ),
                 (HotkeyAction::ThemeSelectorSelect, "select theme", None),
                 (HotkeyAction::ThemeSelectorCancel, "cancel", None),

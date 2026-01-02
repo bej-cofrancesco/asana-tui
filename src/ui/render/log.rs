@@ -1,4 +1,5 @@
 use super::Frame;
+use crate::config::hotkeys::build_debug_mode_instructions;
 use crate::state::State;
 use crate::ui::widgets::styling;
 use ratatui::{
@@ -11,9 +12,10 @@ use ratatui::{
 ///
 pub fn log(frame: &mut Frame, size: Rect, state: &mut State) {
     let title = if state.is_debug_mode() {
-        "Log (DEBUG MODE: j/k: navigate, y: copy, / or Esc: exit)"
+        let instructions = build_debug_mode_instructions(state.get_hotkeys());
+        format!("Log (DEBUG MODE: {})", instructions)
     } else {
-        "Logs"
+        "Logs".to_string()
     };
 
     let block = Block::default().title(title).borders(Borders::ALL);

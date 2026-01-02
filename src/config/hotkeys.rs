@@ -13,11 +13,13 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HotkeyAction {
+    // Global navigation actions (work across all views)
+    NavigateNext,  // j - navigate down/next in any view
+    NavigatePrev,  // k - navigate up/prev in any view
+    NavigateLeft,  // h - navigate left in any view
+    NavigateRight, // l - navigate right in any view
+
     // Welcome view actions
-    NavigateMenuNext,
-    NavigateMenuPrev,
-    NavigateMenuLeft,
-    NavigateMenuRight,
     ToggleStar,
     EnterSearch,
     EnterDebug,
@@ -28,10 +30,6 @@ pub enum HotkeyAction {
     OpenHotkeyEditor,
 
     // ProjectTasks view actions
-    NavigateTaskNext,
-    NavigateTaskPrev,
-    NavigateColumnNext,
-    NavigateColumnPrev,
     ViewTask,
     CreateTask,
     MoveTask,
@@ -40,32 +38,21 @@ pub enum HotkeyAction {
     Back,
 
     // TaskDetail view actions
-    SwitchPanelNext,
-    SwitchPanelPrev,
-    ScrollDown,
-    ScrollUp,
     EditTask,
     AddComment,
 
     // CreateTask/EditTask view actions
-    NavigateFieldNext,
-    NavigateFieldPrev,
     EditField,
     SubmitForm,
 
     // Special mode actions (for search, debug, modals, etc.)
+    // Note: Navigation in special modes uses global NavigateNext/NavigatePrev
     SearchModeExit,
-    DebugModeNavigateNext,
-    DebugModeNavigatePrev,
     DebugModeCopyLog,
     DebugModeExit,
     DeleteConfirm,
-    MoveTaskNavigateNext,
-    MoveTaskNavigatePrev,
     MoveTaskConfirm,
     MoveTaskCancel,
-    ThemeSelectorNavigateNext,
-    ThemeSelectorNavigatePrev,
     ThemeSelectorSelect,
     ThemeSelectorCancel,
 }
@@ -126,8 +113,8 @@ impl<'de> Deserialize<'de> for Hotkey {
                 let mut code: Option<KeyCode> = None;
                 let mut modifiers: Option<KeyModifiers> = None;
 
-                while let Some(key) = map.next_key()? {
-                    match key {
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
                         "code" => {
                             if code.is_some() {
                                 return Err(de::Error::duplicate_field("code"));
@@ -163,6 +150,7 @@ impl<'de> Deserialize<'de> for Hotkey {
 /// Helper types for serialization of KeyCode and KeyModifiers.
 ///
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 enum KeyCodeSerde {
     Backspace,
     Enter,
@@ -294,6 +282,13 @@ impl ViewHotkeys {
     ///
     pub fn get_overrides(&self) -> ViewHotkeys {
         let defaults = default_hotkeys();
+        let global_nav = global_navigation_hotkeys();
+        let global_nav_actions = [
+            HotkeyAction::NavigateNext,
+            HotkeyAction::NavigatePrev,
+            HotkeyAction::NavigateLeft,
+            HotkeyAction::NavigateRight,
+        ];
         let mut overrides = ViewHotkeys {
             welcome: HashMap::new(),
             project_tasks: HashMap::new(),
@@ -307,31 +302,75 @@ impl ViewHotkeys {
             theme_selector: HashMap::new(),
         };
 
-        // Only include hotkeys that differ from defaults
+        // Check if any global navigation action is overridden
+        for action in &global_nav_actions {
+            let default_hotkey = global_nav.get(action);
+            let mut has_override = false;
+            let mut override_hotkey = None;
+
+            // Check all views to see if any have a different value
+            for view_hotkeys in [
+                &self.welcome,
+                &self.project_tasks,
+                &self.task_detail,
+                &self.create_task,
+                &self.edit_task,
+                &self.debug_mode,
+                &self.move_task,
+                &self.theme_selector,
+            ] {
+                if let Some(hotkey) = view_hotkeys.get(action) {
+                    if Some(hotkey) != default_hotkey {
+                        has_override = true;
+                        override_hotkey = Some(hotkey.clone());
+                        break;
+                    }
+                }
+            }
+
+            // If there's an override, store it in welcome (as the canonical location)
+            // merge_with_defaults will apply it globally
+            if has_override {
+                if let Some(hotkey) = override_hotkey {
+                    overrides.welcome.insert(action.clone(), hotkey);
+                }
+            }
+        }
+
+        // Only include non-navigation hotkeys that differ from defaults
         for (action, hotkey) in &self.welcome {
-            if defaults.welcome.get(action) != Some(hotkey) {
+            if !global_nav_actions.contains(action) && defaults.welcome.get(action) != Some(hotkey)
+            {
                 overrides.welcome.insert(action.clone(), hotkey.clone());
             }
         }
         for (action, hotkey) in &self.project_tasks {
-            if defaults.project_tasks.get(action) != Some(hotkey) {
+            if !global_nav_actions.contains(action)
+                && defaults.project_tasks.get(action) != Some(hotkey)
+            {
                 overrides
                     .project_tasks
                     .insert(action.clone(), hotkey.clone());
             }
         }
         for (action, hotkey) in &self.task_detail {
-            if defaults.task_detail.get(action) != Some(hotkey) {
+            if !global_nav_actions.contains(action)
+                && defaults.task_detail.get(action) != Some(hotkey)
+            {
                 overrides.task_detail.insert(action.clone(), hotkey.clone());
             }
         }
         for (action, hotkey) in &self.create_task {
-            if defaults.create_task.get(action) != Some(hotkey) {
+            if !global_nav_actions.contains(action)
+                && defaults.create_task.get(action) != Some(hotkey)
+            {
                 overrides.create_task.insert(action.clone(), hotkey.clone());
             }
         }
         for (action, hotkey) in &self.edit_task {
-            if defaults.edit_task.get(action) != Some(hotkey) {
+            if !global_nav_actions.contains(action)
+                && defaults.edit_task.get(action) != Some(hotkey)
+            {
                 overrides.edit_task.insert(action.clone(), hotkey.clone());
             }
         }
@@ -341,7 +380,9 @@ impl ViewHotkeys {
             }
         }
         for (action, hotkey) in &self.debug_mode {
-            if defaults.debug_mode.get(action) != Some(hotkey) {
+            if !global_nav_actions.contains(action)
+                && defaults.debug_mode.get(action) != Some(hotkey)
+            {
                 overrides.debug_mode.insert(action.clone(), hotkey.clone());
             }
         }
@@ -353,12 +394,16 @@ impl ViewHotkeys {
             }
         }
         for (action, hotkey) in &self.move_task {
-            if defaults.move_task.get(action) != Some(hotkey) {
+            if !global_nav_actions.contains(action)
+                && defaults.move_task.get(action) != Some(hotkey)
+            {
                 overrides.move_task.insert(action.clone(), hotkey.clone());
             }
         }
         for (action, hotkey) in &self.theme_selector {
-            if defaults.theme_selector.get(action) != Some(hotkey) {
+            if !global_nav_actions.contains(action)
+                && defaults.theme_selector.get(action) != Some(hotkey)
+            {
                 overrides
                     .theme_selector
                     .insert(action.clone(), hotkey.clone());
@@ -372,28 +417,73 @@ impl ViewHotkeys {
     ///
     pub fn merge_with_defaults(overrides: &ViewHotkeys) -> ViewHotkeys {
         let mut merged = default_hotkeys();
+        let global_nav_actions = [
+            HotkeyAction::NavigateNext,
+            HotkeyAction::NavigatePrev,
+            HotkeyAction::NavigateLeft,
+            HotkeyAction::NavigateRight,
+        ];
 
-        // Apply overrides on top of defaults
+        // First, check if any global navigation actions are overridden
+        for action in &global_nav_actions {
+            // Check if this action is overridden in any view
+            let override_hotkey = overrides
+                .welcome
+                .get(action)
+                .or_else(|| overrides.project_tasks.get(action))
+                .or_else(|| overrides.task_detail.get(action))
+                .or_else(|| overrides.create_task.get(action))
+                .or_else(|| overrides.edit_task.get(action))
+                .or_else(|| overrides.debug_mode.get(action))
+                .or_else(|| overrides.move_task.get(action))
+                .or_else(|| overrides.theme_selector.get(action));
+
+            if let Some(hotkey) = override_hotkey {
+                // Apply the override globally to all views
+                merged.welcome.insert(action.clone(), hotkey.clone());
+                merged.project_tasks.insert(action.clone(), hotkey.clone());
+                merged.task_detail.insert(action.clone(), hotkey.clone());
+                merged.create_task.insert(action.clone(), hotkey.clone());
+                merged.edit_task.insert(action.clone(), hotkey.clone());
+                merged.debug_mode.insert(action.clone(), hotkey.clone());
+                merged.move_task.insert(action.clone(), hotkey.clone());
+                merged.theme_selector.insert(action.clone(), hotkey.clone());
+            }
+        }
+
+        // Apply non-navigation overrides on top of defaults
         for (action, hotkey) in &overrides.welcome {
-            merged.welcome.insert(action.clone(), hotkey.clone());
+            if !global_nav_actions.contains(action) {
+                merged.welcome.insert(action.clone(), hotkey.clone());
+            }
         }
         for (action, hotkey) in &overrides.project_tasks {
-            merged.project_tasks.insert(action.clone(), hotkey.clone());
+            if !global_nav_actions.contains(action) {
+                merged.project_tasks.insert(action.clone(), hotkey.clone());
+            }
         }
         for (action, hotkey) in &overrides.task_detail {
-            merged.task_detail.insert(action.clone(), hotkey.clone());
+            if !global_nav_actions.contains(action) {
+                merged.task_detail.insert(action.clone(), hotkey.clone());
+            }
         }
         for (action, hotkey) in &overrides.create_task {
-            merged.create_task.insert(action.clone(), hotkey.clone());
+            if !global_nav_actions.contains(action) {
+                merged.create_task.insert(action.clone(), hotkey.clone());
+            }
         }
         for (action, hotkey) in &overrides.edit_task {
-            merged.edit_task.insert(action.clone(), hotkey.clone());
+            if !global_nav_actions.contains(action) {
+                merged.edit_task.insert(action.clone(), hotkey.clone());
+            }
         }
         for (action, hotkey) in &overrides.search_mode {
             merged.search_mode.insert(action.clone(), hotkey.clone());
         }
         for (action, hotkey) in &overrides.debug_mode {
-            merged.debug_mode.insert(action.clone(), hotkey.clone());
+            if !global_nav_actions.contains(action) {
+                merged.debug_mode.insert(action.clone(), hotkey.clone());
+            }
         }
         for (action, hotkey) in &overrides.delete_confirmation {
             merged
@@ -401,10 +491,14 @@ impl ViewHotkeys {
                 .insert(action.clone(), hotkey.clone());
         }
         for (action, hotkey) in &overrides.move_task {
-            merged.move_task.insert(action.clone(), hotkey.clone());
+            if !global_nav_actions.contains(action) {
+                merged.move_task.insert(action.clone(), hotkey.clone());
+            }
         }
         for (action, hotkey) in &overrides.theme_selector {
-            merged.theme_selector.insert(action.clone(), hotkey.clone());
+            if !global_nav_actions.contains(action) {
+                merged.theme_selector.insert(action.clone(), hotkey.clone());
+            }
         }
 
         merged
@@ -426,20 +520,10 @@ pub fn get_hotkey_groups() -> Vec<HotkeyGroup> {
         HotkeyGroup {
             name: "Navigation".to_string(),
             actions: vec![
-                HotkeyAction::NavigateMenuNext,
-                HotkeyAction::NavigateMenuPrev,
-                HotkeyAction::NavigateMenuLeft,
-                HotkeyAction::NavigateMenuRight,
-                HotkeyAction::NavigateTaskNext,
-                HotkeyAction::NavigateTaskPrev,
-                HotkeyAction::NavigateColumnNext,
-                HotkeyAction::NavigateColumnPrev,
-                HotkeyAction::SwitchPanelNext,
-                HotkeyAction::SwitchPanelPrev,
-                HotkeyAction::NavigateFieldNext,
-                HotkeyAction::NavigateFieldPrev,
-                HotkeyAction::ScrollDown,
-                HotkeyAction::ScrollUp,
+                HotkeyAction::NavigateNext,
+                HotkeyAction::NavigatePrev,
+                HotkeyAction::NavigateLeft,
+                HotkeyAction::NavigateRight,
             ],
         },
         HotkeyGroup {
@@ -476,12 +560,7 @@ pub fn get_hotkey_groups() -> Vec<HotkeyGroup> {
         },
         HotkeyGroup {
             name: "Debug Mode".to_string(),
-            actions: vec![
-                HotkeyAction::DebugModeNavigateNext,
-                HotkeyAction::DebugModeNavigatePrev,
-                HotkeyAction::DebugModeCopyLog,
-                HotkeyAction::DebugModeExit,
-            ],
+            actions: vec![HotkeyAction::DebugModeCopyLog, HotkeyAction::DebugModeExit],
         },
         HotkeyGroup {
             name: "Delete Confirmation".to_string(),
@@ -489,18 +568,11 @@ pub fn get_hotkey_groups() -> Vec<HotkeyGroup> {
         },
         HotkeyGroup {
             name: "Move Task".to_string(),
-            actions: vec![
-                HotkeyAction::MoveTaskNavigateNext,
-                HotkeyAction::MoveTaskNavigatePrev,
-                HotkeyAction::MoveTaskConfirm,
-                HotkeyAction::MoveTaskCancel,
-            ],
+            actions: vec![HotkeyAction::MoveTaskConfirm, HotkeyAction::MoveTaskCancel],
         },
         HotkeyGroup {
             name: "Theme Selector".to_string(),
             actions: vec![
-                HotkeyAction::ThemeSelectorNavigateNext,
-                HotkeyAction::ThemeSelectorNavigatePrev,
                 HotkeyAction::ThemeSelectorSelect,
                 HotkeyAction::ThemeSelectorCancel,
             ],
@@ -551,11 +623,18 @@ pub fn find_action_view(action: &HotkeyAction) -> Vec<View> {
 
     // Check each view's typical actions
     match action {
-        HotkeyAction::NavigateMenuNext
-        | HotkeyAction::NavigateMenuPrev
-        | HotkeyAction::NavigateMenuLeft
-        | HotkeyAction::NavigateMenuRight
-        | HotkeyAction::ToggleStar
+        // Global navigation actions work in all views
+        HotkeyAction::NavigateNext
+        | HotkeyAction::NavigatePrev
+        | HotkeyAction::NavigateLeft
+        | HotkeyAction::NavigateRight => {
+            views.push(View::Welcome);
+            views.push(View::ProjectTasks);
+            views.push(View::TaskDetail);
+            views.push(View::CreateTask);
+            views.push(View::EditTask);
+        }
+        HotkeyAction::ToggleStar
         | HotkeyAction::EnterSearch
         | HotkeyAction::EnterDebug
         | HotkeyAction::Select
@@ -563,11 +642,7 @@ pub fn find_action_view(action: &HotkeyAction) -> Vec<View> {
         | HotkeyAction::OpenHotkeyEditor => {
             views.push(View::Welcome);
         }
-        HotkeyAction::NavigateTaskNext
-        | HotkeyAction::NavigateTaskPrev
-        | HotkeyAction::NavigateColumnNext
-        | HotkeyAction::NavigateColumnPrev
-        | HotkeyAction::ViewTask
+        HotkeyAction::ViewTask
         | HotkeyAction::CreateTask
         | HotkeyAction::MoveTask
         | HotkeyAction::ToggleTaskComplete
@@ -575,18 +650,10 @@ pub fn find_action_view(action: &HotkeyAction) -> Vec<View> {
         | HotkeyAction::Back => {
             views.push(View::ProjectTasks);
         }
-        HotkeyAction::SwitchPanelNext
-        | HotkeyAction::SwitchPanelPrev
-        | HotkeyAction::ScrollDown
-        | HotkeyAction::ScrollUp
-        | HotkeyAction::EditTask
-        | HotkeyAction::AddComment => {
+        HotkeyAction::EditTask | HotkeyAction::AddComment => {
             views.push(View::TaskDetail);
         }
-        HotkeyAction::NavigateFieldNext
-        | HotkeyAction::NavigateFieldPrev
-        | HotkeyAction::EditField
-        | HotkeyAction::SubmitForm => {
+        HotkeyAction::EditField | HotkeyAction::SubmitForm => {
             views.push(View::CreateTask);
             views.push(View::EditTask);
         }
@@ -595,10 +662,7 @@ pub fn find_action_view(action: &HotkeyAction) -> Vec<View> {
             views.push(View::Welcome);
             views.push(View::ProjectTasks);
         }
-        HotkeyAction::DebugModeNavigateNext
-        | HotkeyAction::DebugModeNavigatePrev
-        | HotkeyAction::DebugModeCopyLog
-        | HotkeyAction::DebugModeExit => {
+        HotkeyAction::DebugModeCopyLog | HotkeyAction::DebugModeExit => {
             // Debug mode is available from any view
             views.push(View::Welcome);
         }
@@ -607,16 +671,10 @@ pub fn find_action_view(action: &HotkeyAction) -> Vec<View> {
             views.push(View::ProjectTasks);
             views.push(View::TaskDetail);
         }
-        HotkeyAction::MoveTaskNavigateNext
-        | HotkeyAction::MoveTaskNavigatePrev
-        | HotkeyAction::MoveTaskConfirm
-        | HotkeyAction::MoveTaskCancel => {
+        HotkeyAction::MoveTaskConfirm | HotkeyAction::MoveTaskCancel => {
             views.push(View::ProjectTasks);
         }
-        HotkeyAction::ThemeSelectorNavigateNext
-        | HotkeyAction::ThemeSelectorNavigatePrev
-        | HotkeyAction::ThemeSelectorSelect
-        | HotkeyAction::ThemeSelectorCancel => {
+        HotkeyAction::ThemeSelectorSelect | HotkeyAction::ThemeSelectorCancel => {
             views.push(View::Welcome);
         }
         HotkeyAction::Cancel | HotkeyAction::Quit => {
@@ -633,58 +691,180 @@ pub fn find_action_view(action: &HotkeyAction) -> Vec<View> {
 }
 
 /// Update a hotkey for an action across all applicable views.
+/// Also removes the old key binding for that action to prevent conflicts.
 ///
 pub fn update_hotkey_for_action(hotkeys: &mut ViewHotkeys, action: &HotkeyAction, hotkey: Hotkey) {
-    let views = find_action_view(action);
-    for view in views {
-        match view {
-            View::Welcome => {
-                hotkeys.welcome.insert(action.clone(), hotkey.clone());
+    // Global navigation actions are applied to ALL views and special modes
+    let global_nav_actions = [
+        HotkeyAction::NavigateNext,
+        HotkeyAction::NavigatePrev,
+        HotkeyAction::NavigateLeft,
+        HotkeyAction::NavigateRight,
+    ];
+
+    if global_nav_actions.contains(action) {
+        // Remove old binding and apply new one globally to all views and special modes
+        hotkeys.welcome.remove(action);
+        hotkeys.welcome.insert(action.clone(), hotkey.clone());
+        hotkeys.project_tasks.remove(action);
+        hotkeys.project_tasks.insert(action.clone(), hotkey.clone());
+        hotkeys.task_detail.remove(action);
+        hotkeys.task_detail.insert(action.clone(), hotkey.clone());
+        hotkeys.create_task.remove(action);
+        hotkeys.create_task.insert(action.clone(), hotkey.clone());
+        hotkeys.edit_task.remove(action);
+        hotkeys.edit_task.insert(action.clone(), hotkey.clone());
+        hotkeys.debug_mode.remove(action);
+        hotkeys.debug_mode.insert(action.clone(), hotkey.clone());
+        hotkeys.move_task.remove(action);
+        hotkeys.move_task.insert(action.clone(), hotkey.clone());
+        hotkeys.theme_selector.remove(action);
+        hotkeys
+            .theme_selector
+            .insert(action.clone(), hotkey.clone());
+    } else {
+        // Non-global actions: update only in applicable views
+        let views = find_action_view(action);
+        for view in &views {
+            match view {
+                View::Welcome => {
+                    hotkeys.welcome.remove(action);
+                    hotkeys.welcome.insert(action.clone(), hotkey.clone());
+                }
+                View::ProjectTasks => {
+                    hotkeys.project_tasks.remove(action);
+                    hotkeys.project_tasks.insert(action.clone(), hotkey.clone());
+                }
+                View::TaskDetail => {
+                    hotkeys.task_detail.remove(action);
+                    hotkeys.task_detail.insert(action.clone(), hotkey.clone());
+                }
+                View::CreateTask => {
+                    hotkeys.create_task.remove(action);
+                    hotkeys.create_task.insert(action.clone(), hotkey.clone());
+                }
+                View::EditTask => {
+                    hotkeys.edit_task.remove(action);
+                    hotkeys.edit_task.insert(action.clone(), hotkey.clone());
+                }
             }
-            View::ProjectTasks => {
-                hotkeys.project_tasks.insert(action.clone(), hotkey.clone());
+        }
+
+        // Also remove and update in special modes if applicable
+        match action {
+            HotkeyAction::SearchModeExit => {
+                hotkeys.search_mode.remove(action);
+                hotkeys.search_mode.insert(action.clone(), hotkey.clone());
             }
-            View::TaskDetail => {
-                hotkeys.task_detail.insert(action.clone(), hotkey.clone());
+            HotkeyAction::DebugModeCopyLog | HotkeyAction::DebugModeExit => {
+                hotkeys.debug_mode.remove(action);
+                hotkeys.debug_mode.insert(action.clone(), hotkey.clone());
             }
-            View::CreateTask => {
-                hotkeys.create_task.insert(action.clone(), hotkey.clone());
+            HotkeyAction::DeleteConfirm => {
+                hotkeys.delete_confirmation.remove(action);
+                hotkeys
+                    .delete_confirmation
+                    .insert(action.clone(), hotkey.clone());
             }
-            View::EditTask => {
-                hotkeys.edit_task.insert(action.clone(), hotkey.clone());
+            HotkeyAction::MoveTaskConfirm | HotkeyAction::MoveTaskCancel => {
+                hotkeys.move_task.remove(action);
+                hotkeys.move_task.insert(action.clone(), hotkey.clone());
             }
+            HotkeyAction::ThemeSelectorSelect | HotkeyAction::ThemeSelectorCancel => {
+                hotkeys.theme_selector.remove(action);
+                hotkeys
+                    .theme_selector
+                    .insert(action.clone(), hotkey.clone());
+            }
+            _ => {}
         }
     }
 
-    // Also update special modes if applicable
-    match action {
-        HotkeyAction::SearchModeExit => {
-            hotkeys.search_mode.insert(action.clone(), hotkey);
+    // Also remove the new key from any other actions it might be bound to
+    // This prevents one key from triggering multiple actions
+    remove_key_from_all_actions(hotkeys, &hotkey, action);
+}
+
+/// Removes a key binding from all actions except the specified one.
+/// This prevents key conflicts when rebinding.
+///
+fn remove_key_from_all_actions(
+    hotkeys: &mut ViewHotkeys,
+    hotkey: &Hotkey,
+    except_action: &HotkeyAction,
+) {
+    // Helper to remove key from a map
+    let remove_from_map = |map: &mut HashMap<HotkeyAction, Hotkey>| {
+        let mut to_remove = Vec::new();
+        for (action, existing_hotkey) in map.iter() {
+            if action != except_action && matches_hotkey_static(existing_hotkey, hotkey) {
+                to_remove.push(action.clone());
+            }
         }
-        HotkeyAction::DebugModeNavigateNext
-        | HotkeyAction::DebugModeNavigatePrev
-        | HotkeyAction::DebugModeCopyLog
-        | HotkeyAction::DebugModeExit => {
-            hotkeys.debug_mode.insert(action.clone(), hotkey.clone());
+        for action in to_remove {
+            map.remove(&action);
         }
-        HotkeyAction::DeleteConfirm => {
-            hotkeys
-                .delete_confirmation
-                .insert(action.clone(), hotkey.clone());
-        }
-        HotkeyAction::MoveTaskNavigateNext
-        | HotkeyAction::MoveTaskNavigatePrev
-        | HotkeyAction::MoveTaskConfirm
-        | HotkeyAction::MoveTaskCancel => {
-            hotkeys.move_task.insert(action.clone(), hotkey.clone());
-        }
-        HotkeyAction::ThemeSelectorNavigateNext
-        | HotkeyAction::ThemeSelectorNavigatePrev
-        | HotkeyAction::ThemeSelectorSelect
-        | HotkeyAction::ThemeSelectorCancel => {
-            hotkeys.theme_selector.insert(action.clone(), hotkey);
-        }
-        _ => {}
+    };
+
+    remove_from_map(&mut hotkeys.welcome);
+    remove_from_map(&mut hotkeys.project_tasks);
+    remove_from_map(&mut hotkeys.task_detail);
+    remove_from_map(&mut hotkeys.create_task);
+    remove_from_map(&mut hotkeys.edit_task);
+    remove_from_map(&mut hotkeys.search_mode);
+    remove_from_map(&mut hotkeys.debug_mode);
+    remove_from_map(&mut hotkeys.delete_confirmation);
+    remove_from_map(&mut hotkeys.move_task);
+    remove_from_map(&mut hotkeys.theme_selector);
+}
+
+/// Helper to compare hotkeys without needing a KeyEvent.
+///
+fn matches_hotkey_static(hotkey1: &Hotkey, hotkey2: &Hotkey) -> bool {
+    hotkey1.code == hotkey2.code && hotkey1.modifiers == hotkey2.modifiers
+}
+
+/// Get the global navigation hotkeys that apply to all views.
+///
+fn global_navigation_hotkeys() -> HashMap<HotkeyAction, Hotkey> {
+    let mut nav = HashMap::new();
+    nav.insert(
+        HotkeyAction::NavigateNext,
+        Hotkey {
+            code: KeyCode::Char('j'),
+            modifiers: KeyModifiers::empty(),
+        },
+    );
+    nav.insert(
+        HotkeyAction::NavigatePrev,
+        Hotkey {
+            code: KeyCode::Char('k'),
+            modifiers: KeyModifiers::empty(),
+        },
+    );
+    nav.insert(
+        HotkeyAction::NavigateLeft,
+        Hotkey {
+            code: KeyCode::Char('h'),
+            modifiers: KeyModifiers::empty(),
+        },
+    );
+    nav.insert(
+        HotkeyAction::NavigateRight,
+        Hotkey {
+            code: KeyCode::Char('l'),
+            modifiers: KeyModifiers::empty(),
+        },
+    );
+    nav
+}
+
+/// Apply global navigation hotkeys to a view's hotkey map.
+///
+fn apply_global_navigation(map: &mut HashMap<HotkeyAction, Hotkey>) {
+    let global_nav = global_navigation_hotkeys();
+    for (action, hotkey) in global_nav {
+        map.insert(action, hotkey);
     }
 }
 
@@ -692,34 +872,8 @@ pub fn update_hotkey_for_action(hotkeys: &mut ViewHotkeys, action: &HotkeyAction
 ///
 pub fn default_hotkeys() -> ViewHotkeys {
     let mut welcome = HashMap::new();
-    welcome.insert(
-        HotkeyAction::NavigateMenuNext,
-        Hotkey {
-            code: KeyCode::Char('j'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
-    welcome.insert(
-        HotkeyAction::NavigateMenuPrev,
-        Hotkey {
-            code: KeyCode::Char('k'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
-    welcome.insert(
-        HotkeyAction::NavigateMenuLeft,
-        Hotkey {
-            code: KeyCode::Char('h'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
-    welcome.insert(
-        HotkeyAction::NavigateMenuRight,
-        Hotkey {
-            code: KeyCode::Char('l'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
+    // Apply global navigation actions to all views
+    apply_global_navigation(&mut welcome);
     welcome.insert(
         HotkeyAction::ToggleStar,
         Hotkey {
@@ -778,34 +932,8 @@ pub fn default_hotkeys() -> ViewHotkeys {
     );
 
     let mut project_tasks = HashMap::new();
-    project_tasks.insert(
-        HotkeyAction::NavigateTaskNext,
-        Hotkey {
-            code: KeyCode::Char('j'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
-    project_tasks.insert(
-        HotkeyAction::NavigateTaskPrev,
-        Hotkey {
-            code: KeyCode::Char('k'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
-    project_tasks.insert(
-        HotkeyAction::NavigateColumnNext,
-        Hotkey {
-            code: KeyCode::Char('l'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
-    project_tasks.insert(
-        HotkeyAction::NavigateColumnPrev,
-        Hotkey {
-            code: KeyCode::Char('h'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
+    // Apply global navigation actions
+    apply_global_navigation(&mut project_tasks);
     project_tasks.insert(
         HotkeyAction::ViewTask,
         Hotkey {
@@ -871,34 +999,8 @@ pub fn default_hotkeys() -> ViewHotkeys {
     );
 
     let mut task_detail = HashMap::new();
-    task_detail.insert(
-        HotkeyAction::SwitchPanelNext,
-        Hotkey {
-            code: KeyCode::Char('l'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
-    task_detail.insert(
-        HotkeyAction::SwitchPanelPrev,
-        Hotkey {
-            code: KeyCode::Char('h'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
-    task_detail.insert(
-        HotkeyAction::ScrollDown,
-        Hotkey {
-            code: KeyCode::Char('j'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
-    task_detail.insert(
-        HotkeyAction::ScrollUp,
-        Hotkey {
-            code: KeyCode::Char('k'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
+    // Apply global navigation actions
+    apply_global_navigation(&mut task_detail);
     task_detail.insert(
         HotkeyAction::EditTask,
         Hotkey {
@@ -943,20 +1045,8 @@ pub fn default_hotkeys() -> ViewHotkeys {
     );
 
     let mut create_task = HashMap::new();
-    create_task.insert(
-        HotkeyAction::NavigateFieldNext,
-        Hotkey {
-            code: KeyCode::Tab,
-            modifiers: KeyModifiers::empty(),
-        },
-    );
-    create_task.insert(
-        HotkeyAction::NavigateFieldPrev,
-        Hotkey {
-            code: KeyCode::BackTab,
-            modifiers: KeyModifiers::empty(),
-        },
-    );
+    // Apply global navigation actions
+    apply_global_navigation(&mut create_task);
     create_task.insert(
         HotkeyAction::EditField,
         Hotkey {
@@ -998,20 +1088,8 @@ pub fn default_hotkeys() -> ViewHotkeys {
     );
 
     let mut debug_mode = HashMap::new();
-    debug_mode.insert(
-        HotkeyAction::DebugModeNavigateNext,
-        Hotkey {
-            code: KeyCode::Char('j'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
-    debug_mode.insert(
-        HotkeyAction::DebugModeNavigatePrev,
-        Hotkey {
-            code: KeyCode::Char('k'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
+    // Apply global navigation actions
+    apply_global_navigation(&mut debug_mode);
     debug_mode.insert(
         HotkeyAction::DebugModeCopyLog,
         Hotkey {
@@ -1051,20 +1129,8 @@ pub fn default_hotkeys() -> ViewHotkeys {
     );
 
     let mut move_task = HashMap::new();
-    move_task.insert(
-        HotkeyAction::MoveTaskNavigateNext,
-        Hotkey {
-            code: KeyCode::Char('j'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
-    move_task.insert(
-        HotkeyAction::MoveTaskNavigatePrev,
-        Hotkey {
-            code: KeyCode::Char('k'),
-            modifiers: KeyModifiers::empty(),
-        },
-    );
+    // Apply global navigation actions
+    apply_global_navigation(&mut move_task);
     move_task.insert(
         HotkeyAction::MoveTaskConfirm,
         Hotkey {
@@ -1081,15 +1147,16 @@ pub fn default_hotkeys() -> ViewHotkeys {
     );
 
     let mut theme_selector = HashMap::new();
+    // Global navigation actions work in theme selector too
     theme_selector.insert(
-        HotkeyAction::ThemeSelectorNavigateNext,
+        HotkeyAction::NavigateNext,
         Hotkey {
             code: KeyCode::Char('j'),
             modifiers: KeyModifiers::empty(),
         },
     );
     theme_selector.insert(
-        HotkeyAction::ThemeSelectorNavigatePrev,
+        HotkeyAction::NavigatePrev,
         Hotkey {
             code: KeyCode::Char('k'),
             modifiers: KeyModifiers::empty(),
@@ -1275,4 +1342,156 @@ pub fn format_hotkey_display(hotkey: &Hotkey) -> String {
     } else {
         format!("{}+{}", parts.join("+"), key_str)
     }
+}
+
+/// Builds hotkey instructions for move task modal.
+/// Groups navigation keys together (e.g., "j/k: navigate").
+///
+pub fn build_move_task_instructions(hotkeys: &ViewHotkeys) -> String {
+    let mut parts = Vec::new();
+
+    // Group navigation keys
+    let nav_next = hotkeys
+        .move_task
+        .get(&HotkeyAction::NavigateNext)
+        .or_else(|| hotkeys.welcome.get(&HotkeyAction::NavigateNext));
+    let nav_prev = hotkeys
+        .move_task
+        .get(&HotkeyAction::NavigatePrev)
+        .or_else(|| hotkeys.welcome.get(&HotkeyAction::NavigatePrev));
+
+    if let (Some(next), Some(prev)) = (nav_next, nav_prev) {
+        parts.push(format!(
+            "{}/{}: navigate",
+            format_hotkey_display(next),
+            format_hotkey_display(prev)
+        ));
+    }
+
+    // Add select
+    if let Some(select) = hotkeys
+        .move_task
+        .get(&HotkeyAction::Select)
+        .or_else(|| hotkeys.welcome.get(&HotkeyAction::Select))
+    {
+        parts.push(format!("{}: select", format_hotkey_display(select)));
+    }
+
+    // Add cancel
+    if let Some(cancel) = hotkeys
+        .move_task
+        .get(&HotkeyAction::Cancel)
+        .or_else(|| hotkeys.welcome.get(&HotkeyAction::Cancel))
+    {
+        parts.push(format!("{}: cancel", format_hotkey_display(cancel)));
+    }
+
+    parts.join(", ")
+}
+
+/// Builds hotkey instructions for debug mode.
+/// Groups navigation keys together (e.g., "j/k: navigate").
+///
+pub fn build_debug_mode_instructions(hotkeys: &ViewHotkeys) -> String {
+    let mut parts = Vec::new();
+
+    // Group navigation keys
+    let nav_next = hotkeys
+        .debug_mode
+        .get(&HotkeyAction::NavigateNext)
+        .or_else(|| hotkeys.welcome.get(&HotkeyAction::NavigateNext));
+    let nav_prev = hotkeys
+        .debug_mode
+        .get(&HotkeyAction::NavigatePrev)
+        .or_else(|| hotkeys.welcome.get(&HotkeyAction::NavigatePrev));
+
+    if let (Some(next), Some(prev)) = (nav_next, nav_prev) {
+        parts.push(format!(
+            "{}/{}: navigate",
+            format_hotkey_display(next),
+            format_hotkey_display(prev)
+        ));
+    }
+
+    // Add copy
+    if let Some(copy) = hotkeys.debug_mode.get(&HotkeyAction::DebugModeCopyLog) {
+        parts.push(format!("{}: copy", format_hotkey_display(copy)));
+    }
+
+    // Add exit (can be / or Esc)
+    if let Some(exit) = hotkeys.debug_mode.get(&HotkeyAction::DebugModeExit) {
+        parts.push(format!("{}: exit", format_hotkey_display(exit)));
+    }
+
+    parts.join(", ")
+}
+
+/// Builds hotkey instructions for hotkey editor.
+/// Groups navigation keys together (e.g., "j/k: navigate").
+///
+pub fn build_hotkey_editor_instructions(hotkeys: &ViewHotkeys) -> String {
+    let mut parts = Vec::new();
+
+    // Group navigation keys
+    let nav_next = hotkeys.welcome.get(&HotkeyAction::NavigateNext);
+    let nav_prev = hotkeys.welcome.get(&HotkeyAction::NavigatePrev);
+
+    if let (Some(next), Some(prev)) = (nav_next, nav_prev) {
+        parts.push(format!(
+            "{}/{}: navigate",
+            format_hotkey_display(next),
+            format_hotkey_display(prev)
+        ));
+    }
+
+    // Add select (for edit)
+    if let Some(select) = hotkeys.welcome.get(&HotkeyAction::Select) {
+        parts.push(format!("{}: edit", format_hotkey_display(select)));
+    }
+
+    // Add cancel (for close)
+    if let Some(cancel) = hotkeys.welcome.get(&HotkeyAction::Cancel) {
+        parts.push(format!("{}: close", format_hotkey_display(cancel)));
+    }
+
+    parts.join(", ")
+}
+
+/// Builds hotkey instructions for custom field dropdowns.
+/// Groups navigation keys together (e.g., "j/k: navigate").
+///
+pub fn build_custom_field_instructions(hotkeys: &ViewHotkeys) -> String {
+    let mut parts = Vec::new();
+
+    // Group navigation keys
+    let nav_next = hotkeys
+        .create_task
+        .get(&HotkeyAction::NavigateNext)
+        .or_else(|| hotkeys.edit_task.get(&HotkeyAction::NavigateNext))
+        .or_else(|| hotkeys.welcome.get(&HotkeyAction::NavigateNext));
+    let nav_prev = hotkeys
+        .create_task
+        .get(&HotkeyAction::NavigatePrev)
+        .or_else(|| hotkeys.edit_task.get(&HotkeyAction::NavigatePrev))
+        .or_else(|| hotkeys.welcome.get(&HotkeyAction::NavigatePrev));
+
+    if let (Some(next), Some(prev)) = (nav_next, nav_prev) {
+        parts.push(format!(
+            "{}/{}: navigate",
+            format_hotkey_display(next),
+            format_hotkey_display(prev)
+        ));
+    }
+
+    // Add select (for toggle)
+    if let Some(select) = hotkeys
+        .create_task
+        .get(&HotkeyAction::Select)
+        .or_else(|| hotkeys.edit_task.get(&HotkeyAction::Select))
+        .or_else(|| hotkeys.welcome.get(&HotkeyAction::Select))
+    {
+        parts.push(format!("{}: toggle", format_hotkey_display(select)));
+    }
+
+    parts.join(", ")
 }
