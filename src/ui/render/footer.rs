@@ -1,4 +1,5 @@
 use super::Frame;
+use crate::config::hotkeys::{build_footer_text, format_hotkey_display, HotkeyAction};
 use crate::state::State;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -7,42 +8,194 @@ use ratatui::{
     widgets::Paragraph,
 };
 
+/// Format hotkeys for the current view as a display string.
+///
+fn format_hotkeys_for_view(view: &crate::state::View, state: &State) -> String {
+    let hotkeys = state.get_hotkeys();
+    let view_hotkeys = match view {
+        crate::state::View::Welcome => &hotkeys.welcome,
+        crate::state::View::ProjectTasks => &hotkeys.project_tasks,
+        crate::state::View::TaskDetail => &hotkeys.task_detail,
+        crate::state::View::CreateTask => &hotkeys.create_task,
+        crate::state::View::EditTask => &hotkeys.edit_task,
+    };
+
+    match view {
+        crate::state::View::TaskDetail => build_footer_text(
+            view_hotkeys,
+            &[
+                (
+                    HotkeyAction::SwitchPanelPrev,
+                    "switch panel",
+                    Some(HotkeyAction::SwitchPanelNext),
+                ),
+                (
+                    HotkeyAction::ScrollDown,
+                    "scroll",
+                    Some(HotkeyAction::ScrollUp),
+                ),
+                (HotkeyAction::EditTask, "edit", None),
+                (HotkeyAction::DeleteTask, "delete", None),
+                (HotkeyAction::AddComment, "comment", None),
+                (HotkeyAction::Back, "back", None),
+                (HotkeyAction::Quit, "quit", None),
+            ],
+        ),
+        crate::state::View::CreateTask | crate::state::View::EditTask => {
+            if state.is_field_editing_mode() {
+                " Type to edit, Esc: back to navigation, Enter: select (dropdowns)".to_string()
+            } else {
+                build_footer_text(
+                    view_hotkeys,
+                    &[
+                        (
+                            HotkeyAction::NavigateFieldNext,
+                            "navigate fields",
+                            Some(HotkeyAction::NavigateFieldPrev),
+                        ),
+                        (HotkeyAction::EditField, "edit field", None),
+                        (HotkeyAction::SubmitForm, "submit", None),
+                        (HotkeyAction::Cancel, "cancel", None),
+                    ],
+                )
+            }
+        }
+        crate::state::View::ProjectTasks => build_footer_text(
+            view_hotkeys,
+            &[
+                (
+                    HotkeyAction::NavigateTaskNext,
+                    "navigate tasks",
+                    Some(HotkeyAction::NavigateTaskPrev),
+                ),
+                (
+                    HotkeyAction::NavigateColumnPrev,
+                    "navigate columns (auto-scroll)",
+                    Some(HotkeyAction::NavigateColumnNext),
+                ),
+                (HotkeyAction::ViewTask, "view", None),
+                (HotkeyAction::CreateTask, "create", None),
+                (HotkeyAction::MoveTask, "move", None),
+                (HotkeyAction::EnterSearch, "search", None),
+                (HotkeyAction::Back, "back", None),
+                (HotkeyAction::Quit, "quit", None),
+            ],
+        ),
+        crate::state::View::Welcome => {
+            // For Welcome view, we need special handling for the 4-key navigation display
+            let mut parts = Vec::new();
+            if let Some(j) = view_hotkeys.get(&HotkeyAction::NavigateMenuNext) {
+                if let Some(k) = view_hotkeys.get(&HotkeyAction::NavigateMenuPrev) {
+                    if let Some(h) = view_hotkeys.get(&HotkeyAction::NavigateMenuLeft) {
+                        if let Some(l) = view_hotkeys.get(&HotkeyAction::NavigateMenuRight) {
+                            parts.push(format!(
+                                "{} {} {} {}: navigate",
+                                format_hotkey_display(j),
+                                format_hotkey_display(k),
+                                format_hotkey_display(h),
+                                format_hotkey_display(l)
+                            ));
+                        }
+                    }
+                }
+            }
+            // Add other actions using build_footer_text
+            let other_actions = build_footer_text(
+                view_hotkeys,
+                &[
+                    (HotkeyAction::ToggleStar, "add/remove shortcut", None),
+                    (HotkeyAction::EnterSearch, "search", None),
+                    (HotkeyAction::EnterDebug, "debug mode", None),
+                    (HotkeyAction::OpenThemeSelector, "themes", None),
+                    (HotkeyAction::OpenHotkeyEditor, "hotkeys", None),
+                    (HotkeyAction::Select, "select", None),
+                    (HotkeyAction::Cancel, "cancel", None),
+                    (HotkeyAction::Quit, "quit", None),
+                ],
+            );
+            if !other_actions.is_empty() {
+                parts.push(other_actions);
+            }
+            if parts.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", parts.join(","))
+            }
+        }
+    }
+}
+
 /// Render footer widget.
 ///
 pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
+    let hotkeys = state.get_hotkeys();
     let controls_text = if state.is_search_mode() {
-        " Type to search, / or Esc: exit search"
+        format!(
+            " Type to search,{}",
+            build_footer_text(
+                &hotkeys.search_mode,
+                &[(
+                    HotkeyAction::SearchModeExit,
+                    "exit search",
+                    Some(HotkeyAction::Cancel)
+                )]
+            )
+        )
     } else if state.is_debug_mode() {
-        " j/k: navigate logs, y: copy log, / or Esc: exit debug mode"
+        build_footer_text(
+            &hotkeys.debug_mode,
+            &[
+                (
+                    HotkeyAction::DebugModeNavigateNext,
+                    "navigate logs",
+                    Some(HotkeyAction::DebugModeNavigatePrev),
+                ),
+                (HotkeyAction::DebugModeCopyLog, "copy log", None),
+                (
+                    HotkeyAction::DebugModeExit,
+                    "exit debug mode",
+                    Some(HotkeyAction::Cancel),
+                ),
+            ],
+        )
     } else if state.has_delete_confirmation() {
-        " Enter: confirm delete, Esc: cancel"
+        build_footer_text(
+            &hotkeys.delete_confirmation,
+            &[
+                (HotkeyAction::DeleteConfirm, "confirm delete", None),
+                (HotkeyAction::Cancel, "cancel", None),
+            ],
+        )
     } else if state.has_move_task() {
-        " j/k: navigate sections, Enter: move task, Esc: cancel"
+        build_footer_text(
+            &hotkeys.move_task,
+            &[
+                (
+                    HotkeyAction::MoveTaskNavigateNext,
+                    "navigate sections",
+                    Some(HotkeyAction::MoveTaskNavigatePrev),
+                ),
+                (HotkeyAction::MoveTaskConfirm, "move task", None),
+                (HotkeyAction::MoveTaskCancel, "cancel", None),
+            ],
+        )
     } else if state.is_theme_mode() {
-        " j/k: navigate themes, Enter: select theme, Esc: cancel"
+        build_footer_text(
+            &hotkeys.theme_selector,
+            &[
+                (
+                    HotkeyAction::ThemeSelectorNavigateNext,
+                    "navigate themes",
+                    Some(HotkeyAction::ThemeSelectorNavigatePrev),
+                ),
+                (HotkeyAction::ThemeSelectorSelect, "select theme", None),
+                (HotkeyAction::ThemeSelectorCancel, "cancel", None),
+            ],
+        )
     } else if *state.current_focus() == crate::state::Focus::View {
-        match state.current_view() {
-            crate::state::View::TaskDetail => {
-                " h/l: switch panel, j/k: scroll, e: edit, d: delete, c: comment, Esc: back, q: quit"
-            }
-            crate::state::View::CreateTask | crate::state::View::EditTask => {
-                if state.is_field_editing_mode() {
-                    // When actively editing a field
-                    " Type to edit, Esc: back to navigation, Enter: select (dropdowns)"
-                } else {
-                    // When navigating between fields
-                    " j/k: navigate fields, Enter: edit field, s: submit, Esc: cancel"
-                }
-            }
-            crate::state::View::ProjectTasks => {
-                " j/k: navigate tasks, h/l: navigate columns (auto-scroll), Enter: view, n: create, m: move, /: search, Esc: back, q: quit"
-            }
-            _ => {
-                "j k h l: navigate, s: add/remove shortcut, /: search, d: debug mode, enter: select, esc: cancel, q: quit"
-            }
-        }
+        format_hotkeys_for_view(state.current_view(), state)
     } else {
-        " j k h l: navigate, s: add/remove shortcut, /: search, d: debug mode, enter: select, esc: cancel, q: quit"
+        format_hotkeys_for_view(&crate::state::View::Welcome, state)
     };
 
     let theme = state.get_theme();
@@ -56,7 +209,10 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                     .bg(theme.footer_search.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
+            Span::styled(
+                controls_text.as_str(),
+                Style::default().fg(theme.warning.to_color()),
+            ),
         ])
     } else if state.is_theme_mode() {
         // Show theme mode indicator with different styling
@@ -68,7 +224,10 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                     .bg(theme.footer_edit.to_color()) // Use edit color for theme mode
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
+            Span::styled(
+                controls_text.as_str(),
+                Style::default().fg(theme.warning.to_color()),
+            ),
         ])
     } else if state.is_debug_mode() {
         // Show debug mode indicator with different styling
@@ -80,7 +239,10 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                     .bg(theme.footer_debug.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
+            Span::styled(
+                controls_text.as_str(),
+                Style::default().fg(theme.warning.to_color()),
+            ),
         ])
     } else if state.has_delete_confirmation() {
         Line::from(vec![
@@ -91,7 +253,10 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                     .bg(theme.footer_delete.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
+            Span::styled(
+                controls_text.as_str(),
+                Style::default().fg(theme.warning.to_color()),
+            ),
         ])
     } else if state.has_move_task() {
         Line::from(vec![
@@ -102,7 +267,10 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                     .bg(theme.footer_move.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
+            Span::styled(
+                controls_text.as_str(),
+                Style::default().fg(theme.warning.to_color()),
+            ),
         ])
     } else if matches!(
         state.current_view(),
@@ -118,7 +286,10 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                     .bg(theme.footer_edit.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
+            Span::styled(
+                controls_text.as_str(),
+                Style::default().fg(theme.warning.to_color()),
+            ),
         ])
     } else if *state.current_focus() == crate::state::Focus::View
         && matches!(state.current_view(), crate::state::View::ProjectTasks)
@@ -131,7 +302,10 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                     .bg(theme.footer_tasks.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
+            Span::styled(
+                controls_text.as_str(),
+                Style::default().fg(theme.warning.to_color()),
+            ),
         ])
     } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
         Line::from(vec![
@@ -142,7 +316,10 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                     .bg(theme.footer_task.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
+            Span::styled(
+                controls_text.as_str(),
+                Style::default().fg(theme.warning.to_color()),
+            ),
         ])
     } else {
         Line::from(vec![
@@ -153,7 +330,10 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                     .bg(theme.footer_normal.to_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(controls_text, Style::default().fg(theme.warning.to_color())),
+            Span::styled(
+                controls_text.as_str(),
+                Style::default().fg(theme.warning.to_color()),
+            ),
         ])
     };
 

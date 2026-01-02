@@ -8,6 +8,7 @@ mod create_task;
 mod edit_task;
 mod footer;
 mod form_dropdowns;
+mod hotkey_editor;
 mod kanban;
 mod log;
 mod main;

@@ -4,8 +4,10 @@
 //! including API tokens, starred projects, and theme preferences.
 
 mod error;
+pub mod hotkeys;
 
 pub use error::ConfigError;
+pub use hotkeys::{get_action_for_special_mode, Hotkey, HotkeyAction, SpecialMode, ViewHotkeys};
 
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
@@ -26,6 +28,7 @@ pub struct Config {
     pub starred_projects: Vec<String>, // GIDs
     pub starred_project_names: std::collections::HashMap<String, String>, // GID -> Name
     pub theme_name: String,
+    pub hotkeys: ViewHotkeys,
     file_path: Option<PathBuf>,
 }
 
@@ -40,6 +43,8 @@ struct FileSpec {
     pub starred_project_names: std::collections::HashMap<String, String>, // GID -> Name
     #[serde(default = "default_theme_name")]
     pub theme_name: String,
+    #[serde(default)]
+    pub hotkeys: ViewHotkeys,
 }
 
 fn default_theme_name() -> String {
@@ -56,6 +61,7 @@ impl Config {
             starred_projects: vec![],
             starred_project_names: std::collections::HashMap::new(),
             theme_name: default_theme_name(),
+            hotkeys: ViewHotkeys::default(),
         }
     }
 
@@ -95,6 +101,7 @@ impl Config {
             self.starred_projects = data.starred_projects;
             self.starred_project_names = data.starred_project_names;
             self.theme_name = data.theme_name;
+            self.hotkeys = data.hotkeys;
         }
         // Otherwise, leave access_token as None - will be handled in TUI onboarding
         // Don't prompt via stdin, let the TUI handle it
@@ -117,6 +124,7 @@ impl Config {
             starred_projects: self.starred_projects.clone(),
             starred_project_names: self.starred_project_names.clone(),
             theme_name: self.theme_name.clone(),
+            hotkeys: self.hotkeys.clone(),
         };
         let content = serde_yaml::to_string(&data)
             .map_err(|e| ConfigError::SerializationFailed(e.to_string()))?;
@@ -160,6 +168,7 @@ impl Config {
             starred_projects: self.starred_projects.clone(),
             starred_project_names: self.starred_project_names.clone(),
             theme_name: self.theme_name.clone(),
+            hotkeys: self.hotkeys.clone(),
         };
         let content = serde_yaml::to_string(&data)
             .map_err(|e| ConfigError::SerializationFailed(e.to_string()))?;

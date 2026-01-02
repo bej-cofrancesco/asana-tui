@@ -1,5 +1,6 @@
 use crate::app::NetworkEventSender;
 use crate::asana::{CustomField, Project, Section, Story, Task, User, Workspace};
+use crate::config::{HotkeyAction, ViewHotkeys};
 use crate::events::network::Event as NetworkEvent;
 use crate::ui::SPINNER_FRAME_COUNT;
 use log::*;
@@ -98,6 +99,11 @@ pub struct State {
     has_access_token: bool,    // Whether access token exists (user is logged in)
     auth_error: Option<String>, // Error message if authentication fails
     theme: crate::ui::Theme,   // Current theme
+    hotkeys: ViewHotkeys,      // Hotkey bindings per view
+    hotkey_editor_open: bool,  // Whether hotkey editor modal is open
+    hotkey_editor_view: Option<View>, // Which view is being edited
+    hotkey_editor_selected_action: Option<HotkeyAction>, // Action being edited
+    hotkey_editor_dropdown_index: usize, // Selected index in hotkey editor
 }
 
 // SearchTarget and TaskDetailPanel are now in navigation.rs
@@ -181,6 +187,11 @@ impl Default for State {
             has_access_token: false, // Default to false, will be set when token is loaded
             auth_error: None,        // No error initially
             theme: crate::ui::Theme::default(),
+            hotkeys: ViewHotkeys::default(),
+            hotkey_editor_open: false,
+            hotkey_editor_view: None,
+            hotkey_editor_selected_action: None,
+            hotkey_editor_dropdown_index: 0,
         }
     }
 }
@@ -193,6 +204,7 @@ impl State {
         starred_project_names: HashMap<String, String>,
         has_access_token: bool,
         theme: crate::ui::Theme,
+        hotkeys: ViewHotkeys,
     ) -> Self {
         State {
             net_sender: Some(net_sender),
@@ -202,6 +214,7 @@ impl State {
             debug_entries: vec![], // Initialize empty, will be populated by logger
             has_access_token,
             theme,
+            hotkeys,
             ..State::default()
         }
     }
@@ -1261,6 +1274,125 @@ impl State {
                 self.theme_dropdown_index = available_themes.len() - 1;
             } else {
                 self.theme_dropdown_index -= 1;
+            }
+        }
+        self
+    }
+
+    /// Get hotkeys.
+    ///
+    pub fn get_hotkeys(&self) -> &ViewHotkeys {
+        &self.hotkeys
+    }
+
+    /// Set hotkeys.
+    ///
+    pub fn set_hotkeys(&mut self, hotkeys: ViewHotkeys) -> &mut Self {
+        self.hotkeys = hotkeys;
+        self
+    }
+
+    /// Open hotkey editor modal.
+    ///
+    pub fn open_hotkey_editor(&mut self) -> &mut Self {
+        self.hotkey_editor_open = true;
+        self.hotkey_editor_view = Some(self.current_view().clone());
+        self.hotkey_editor_dropdown_index = 0;
+        self
+    }
+
+    /// Close hotkey editor modal.
+    ///
+    pub fn close_hotkey_editor(&mut self) -> &mut Self {
+        self.hotkey_editor_open = false;
+        self.hotkey_editor_view = None;
+        self.hotkey_editor_selected_action = None;
+        self
+    }
+
+    /// Check if hotkey editor modal is open.
+    ///
+    pub fn has_hotkey_editor(&self) -> bool {
+        self.hotkey_editor_open
+    }
+
+    /// Get hotkey editor view.
+    ///
+    pub fn get_hotkey_editor_view(&self) -> Option<&View> {
+        self.hotkey_editor_view.as_ref()
+    }
+
+    /// Set hotkey editor view.
+    ///
+    #[allow(dead_code)]
+    pub fn set_hotkey_editor_view(&mut self, view: Option<View>) -> &mut Self {
+        self.hotkey_editor_view = view;
+        self
+    }
+
+    /// Get hotkey editor dropdown index.
+    ///
+    pub fn get_hotkey_editor_dropdown_index(&self) -> usize {
+        self.hotkey_editor_dropdown_index
+    }
+
+    /// Get hotkey editor selected action.
+    ///
+    pub fn get_hotkey_editor_selected_action(&self) -> Option<&HotkeyAction> {
+        self.hotkey_editor_selected_action.as_ref()
+    }
+
+    /// Set hotkey editor selected action.
+    ///
+    pub fn set_hotkey_editor_selected_action(&mut self, action: Option<HotkeyAction>) -> &mut Self {
+        self.hotkey_editor_selected_action = action;
+        self
+    }
+
+    /// Navigate to next hotkey action in editor.
+    ///
+    pub fn next_hotkey_action(&mut self) -> &mut Self {
+        // Get actions for current view
+        let actions = if let Some(view) = &self.hotkey_editor_view {
+            match view {
+                View::Welcome => &self.hotkeys.welcome,
+                View::ProjectTasks => &self.hotkeys.project_tasks,
+                View::TaskDetail => &self.hotkeys.task_detail,
+                View::CreateTask => &self.hotkeys.create_task,
+                View::EditTask => &self.hotkeys.edit_task,
+            }
+        } else {
+            return self;
+        };
+
+        if !actions.is_empty() {
+            self.hotkey_editor_dropdown_index =
+                (self.hotkey_editor_dropdown_index + 1) % actions.len();
+        }
+        self
+    }
+
+    /// Navigate to previous hotkey action in editor.
+    ///
+    pub fn previous_hotkey_action(&mut self) -> &mut Self {
+        // Get actions for current view
+        let actions = if let Some(view) = &self.hotkey_editor_view {
+            match view {
+                View::Welcome => &self.hotkeys.welcome,
+                View::ProjectTasks => &self.hotkeys.project_tasks,
+                View::TaskDetail => &self.hotkeys.task_detail,
+                View::CreateTask => &self.hotkeys.create_task,
+                View::EditTask => &self.hotkeys.edit_task,
+            }
+        } else {
+            return self;
+        };
+
+        if !actions.is_empty() {
+            if self.hotkey_editor_dropdown_index == 0 {
+                self.hotkey_editor_dropdown_index = actions.len() - 1;
+            } else {
+                self.hotkey_editor_dropdown_index -= 1;
             }
         }
         self

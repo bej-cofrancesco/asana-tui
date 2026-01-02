@@ -64,6 +64,7 @@ impl App {
             starred_project_names,
             has_access_token,
             theme,
+            config.hotkeys.clone(),
         )));
 
         // Set up log capture to state BEFORE initializing tui_logger
@@ -162,6 +163,7 @@ impl App {
             app.config.starred_projects = state.get_starred_project_gids();
             app.config.starred_project_names = state.get_starred_project_names();
             app.config.theme_name = state.get_theme().name.clone();
+            app.config.hotkeys = state.get_hotkeys().clone();
             if let Err(e) = app.config.save() {
                 error!("Failed to save config on exit: {}", e);
             }
@@ -191,6 +193,7 @@ impl App {
                             config.starred_projects = state_guard.get_starred_project_gids();
                             config.starred_project_names = state_guard.get_starred_project_names();
                             config.theme_name = state_guard.get_theme().name.clone();
+                            config.hotkeys = state_guard.get_hotkeys().clone();
                             if let Err(e) = config.save() {
                                 error!("Failed to save config: {}", e);
                             }

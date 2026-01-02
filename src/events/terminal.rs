@@ -3,6 +3,9 @@
 //! This module handles all terminal input events, including keyboard input, mouse events,
 //! and user interactions. It processes these events and updates the application state accordingly.
 
+use crate::config::{
+    get_action_for_special_mode, hotkeys::get_action_for_event, Hotkey, HotkeyAction, SpecialMode,
+};
 use crate::state::{Focus, Menu, State};
 use anyhow::Result;
 use clipboard::{ClipboardContext, ClipboardProvider};
@@ -17,6 +20,94 @@ use tui_textarea::Input;
 /// Specify terminal event poll rate in milliseconds.
 ///
 const TICK_RATE_IN_MS: u64 = 60;
+
+/// Helper function to check if an event matches a hotkey action and execute it.
+/// Returns true if action was handled, false otherwise.
+///
+fn try_execute_hotkey_action(event: &KeyEvent, state: &mut State) -> Result<Option<bool>> {
+    // Don't check hotkeys in special modes - they have their own handling
+    if state.is_search_mode()
+        || state.is_debug_mode()
+        || state.is_field_editing_mode()
+        || state.is_comment_input_mode()
+        || state.has_delete_confirmation()
+        || state.has_theme_selector()
+        || state.has_move_task()
+    {
+        return Ok(None);
+    }
+
+    if let Some(action) = get_action_for_event(event, state.current_view(), state.get_hotkeys()) {
+        match action {
+            HotkeyAction::Quit => {
+                debug!("Processing exit terminal event (hotkey) '{:?}'...", event);
+                return Ok(Some(false));
+            }
+            HotkeyAction::Cancel | HotkeyAction::Back => {
+                // Esc/back handling - check special states first
+                if state.has_delete_confirmation() {
+                    debug!(
+                        "Processing cancel delete confirmation event '{:?}'...",
+                        event
+                    );
+                    state.cancel_delete_confirmation();
+                    return Ok(Some(true));
+                }
+                if state.has_theme_selector() {
+                    debug!("Processing cancel theme selector event '{:?}'...", event);
+                    state.close_theme_selector();
+                    return Ok(Some(true));
+                }
+                if state.has_move_task() {
+                    debug!("Processing cancel move task event '{:?}'...", event);
+                    state.clear_move_task();
+                    return Ok(Some(true));
+                }
+                if state.is_comment_input_mode() {
+                    debug!("Processing cancel comment input event '{:?}'...", event);
+                    state.exit_comment_input_mode();
+                    return Ok(Some(true));
+                }
+                if *state.current_focus() == Focus::View {
+                    debug!("Processing view navigation (Esc) event '{:?}'...", event);
+                    if let Some(popped_view) = state.pop_view() {
+                        debug!(
+                            "Popped view: {:?}, remaining views: {}",
+                            popped_view,
+                            state.view_stack_len()
+                        );
+                        match popped_view {
+                            crate::state::View::TaskDetail
+                            | crate::state::View::EditTask
+                            | crate::state::View::CreateTask => {
+                                if matches!(state.current_view(), crate::state::View::ProjectTasks)
+                                {
+                                    state.dispatch(crate::events::network::Event::ProjectTasks);
+                                }
+                            }
+                            crate::state::View::ProjectTasks => {
+                                state.focus_menu();
+                            }
+                            _ => {}
+                        }
+                        if matches!(state.current_view(), crate::state::View::Welcome) {
+                            state.focus_menu();
+                        }
+                    } else {
+                        debug!("No more views to pop, focusing menu");
+                        state.focus_menu();
+                    }
+                    return Ok(Some(true));
+                }
+            }
+            _ => {
+                // Other actions will be handled by specific key matches below
+                // Return None to continue processing
+            }
+        }
+    }
+    Ok(None)
+}
 
 /// Specify different terminal event types.
 ///
@@ -548,6 +639,117 @@ impl Handler {
                         }
                     }
                 }
+                // Handle hotkey editor key capture FIRST
+                if state.has_hotkey_editor() {
+                    if let Some(action) = state.get_hotkey_editor_selected_action() {
+                        // Capturing a key for rebinding
+                        match event {
+                            KeyEvent {
+                                code: KeyCode::Esc,
+                                modifiers: KeyModifiers::NONE,
+                                ..
+                            } => {
+                                // Cancel rebinding
+                                state.set_hotkey_editor_selected_action(None);
+                                return Ok(true);
+                            }
+                            _ => {
+                                // Bind the key to the action
+                                let hotkey = Hotkey {
+                                    code: event.code,
+                                    modifiers: event.modifiers,
+                                };
+                                let view = state
+                                    .get_hotkey_editor_view()
+                                    .cloned()
+                                    .unwrap_or_else(|| state.current_view().clone());
+                                let mut hotkeys = state.get_hotkeys().clone();
+                                match view {
+                                    crate::state::View::Welcome => {
+                                        hotkeys.welcome.insert(action.clone(), hotkey);
+                                    }
+                                    crate::state::View::ProjectTasks => {
+                                        hotkeys.project_tasks.insert(action.clone(), hotkey);
+                                    }
+                                    crate::state::View::TaskDetail => {
+                                        hotkeys.task_detail.insert(action.clone(), hotkey);
+                                    }
+                                    crate::state::View::CreateTask => {
+                                        hotkeys.create_task.insert(action.clone(), hotkey);
+                                    }
+                                    crate::state::View::EditTask => {
+                                        hotkeys.edit_task.insert(action.clone(), hotkey);
+                                    }
+                                }
+                                state.set_hotkeys(hotkeys);
+                                state.set_hotkey_editor_selected_action(None);
+                                // Trigger config save - config will be saved on next save cycle
+                                return Ok(true);
+                            }
+                        }
+                    } else {
+                        // Navigating in hotkey editor
+                        let action = get_action_for_event(
+                            &event,
+                            state
+                                .get_hotkey_editor_view()
+                                .unwrap_or(state.current_view()),
+                            state.get_hotkeys(),
+                        );
+                        match action {
+                            Some(HotkeyAction::NavigateMenuNext)
+                            | Some(HotkeyAction::NavigateTaskNext)
+                            | Some(HotkeyAction::NavigateFieldNext) => {
+                                state.next_hotkey_action();
+                                return Ok(true);
+                            }
+                            Some(HotkeyAction::NavigateMenuPrev)
+                            | Some(HotkeyAction::NavigateTaskPrev)
+                            | Some(HotkeyAction::NavigateFieldPrev) => {
+                                state.previous_hotkey_action();
+                                return Ok(true);
+                            }
+                            Some(HotkeyAction::Select) => {
+                                // Start editing the selected action
+                                let view = state
+                                    .get_hotkey_editor_view()
+                                    .cloned()
+                                    .unwrap_or_else(|| state.current_view().clone());
+                                let actions: Vec<HotkeyAction> = match view {
+                                    crate::state::View::Welcome => {
+                                        state.get_hotkeys().welcome.keys().cloned().collect()
+                                    }
+                                    crate::state::View::ProjectTasks => {
+                                        state.get_hotkeys().project_tasks.keys().cloned().collect()
+                                    }
+                                    crate::state::View::TaskDetail => {
+                                        state.get_hotkeys().task_detail.keys().cloned().collect()
+                                    }
+                                    crate::state::View::CreateTask => {
+                                        state.get_hotkeys().create_task.keys().cloned().collect()
+                                    }
+                                    crate::state::View::EditTask => {
+                                        state.get_hotkeys().edit_task.keys().cloned().collect()
+                                    }
+                                };
+                                let index = state.get_hotkey_editor_dropdown_index();
+                                if let Some(action) = actions.get(index) {
+                                    state.set_hotkey_editor_selected_action(Some(action.clone()));
+                                }
+                                return Ok(true);
+                            }
+                            Some(HotkeyAction::Cancel) => {
+                                state.close_hotkey_editor();
+                                return Ok(true);
+                            }
+                            _ => {
+                                // Other keys don't do anything in hotkey editor
+                                return Ok(true);
+                            }
+                        }
+                    }
+                }
+
                 match event {
                     KeyEvent {
                         code: KeyCode::Char('c'),
@@ -781,6 +983,13 @@ impl Handler {
                         if state.is_search_mode() {
                             state.add_search_char('q');
                         } else {
+                            // Try hotkey first
+                            if let Ok(Some(should_continue)) =
+                                try_execute_hotkey_action(&event, state)
+                            {
+                                return Ok(should_continue);
+                            }
+                            // Fallback to default behavior
                             debug!("Processing exit terminal event '{:?}'...", event);
                             return Ok(false);
                         }
@@ -790,22 +999,82 @@ impl Handler {
                         modifiers: KeyModifiers::NONE,
                         ..
                     } => {
+                        // Handle special modes first (they take priority)
                         if state.is_search_mode() {
+                            if let Some(HotkeyAction::SearchModeExit | HotkeyAction::Cancel) =
+                                get_action_for_special_mode(
+                                    &event,
+                                    SpecialMode::Search,
+                                    state.get_hotkeys(),
+                                )
+                            {
+                                debug!("Processing exit search mode event '{:?}'...", event);
+                                state.exit_search_mode();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!("Processing exit search mode event '{:?}'...", event);
                             state.exit_search_mode();
                         } else if state.is_debug_mode() {
+                            if let Some(HotkeyAction::DebugModeExit | HotkeyAction::Cancel) =
+                                get_action_for_special_mode(
+                                    &event,
+                                    SpecialMode::Debug,
+                                    state.get_hotkeys(),
+                                )
+                            {
+                                debug!("Processing exit debug mode (Esc) event '{:?}'...", event);
+                                state.exit_debug_mode();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!("Processing exit debug mode (Esc) event '{:?}'...", event);
                             state.exit_debug_mode();
                         } else if state.has_delete_confirmation() {
+                            if let Some(HotkeyAction::Cancel) = get_action_for_special_mode(
+                                &event,
+                                SpecialMode::DeleteConfirmation,
+                                state.get_hotkeys(),
+                            ) {
+                                debug!(
+                                    "Processing cancel delete confirmation event '{:?}'...",
+                                    event
+                                );
+                                state.cancel_delete_confirmation();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!(
                                 "Processing cancel delete confirmation event '{:?}'...",
                                 event
                             );
                             state.cancel_delete_confirmation();
                         } else if state.has_theme_selector() {
+                            if let Some(HotkeyAction::ThemeSelectorCancel) =
+                                get_action_for_special_mode(
+                                    &event,
+                                    SpecialMode::ThemeSelector,
+                                    state.get_hotkeys(),
+                                )
+                            {
+                                debug!("Processing cancel theme selector event '{:?}'...", event);
+                                state.close_theme_selector();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!("Processing cancel theme selector event '{:?}'...", event);
                             state.close_theme_selector();
                         } else if state.has_move_task() {
+                            if let Some(HotkeyAction::MoveTaskCancel) = get_action_for_special_mode(
+                                &event,
+                                SpecialMode::MoveTask,
+                                state.get_hotkeys(),
+                            ) {
+                                debug!("Processing cancel move task event '{:?}'...", event);
+                                state.clear_move_task();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!("Processing cancel move task event '{:?}'...", event);
                             state.clear_move_task();
                         } else if state.is_comment_input_mode() {
@@ -859,58 +1128,104 @@ impl Handler {
                         modifiers: KeyModifiers::NONE,
                         ..
                     } => {
+                        // Handle special modes first
                         if state.is_search_mode() {
                             state.add_search_char('h');
                         } else if matches!(
                             state.current_view(),
                             crate::state::View::CreateTask | crate::state::View::EditTask
-                        ) {
-                            // In CreateTask/EditTask view, h should only type if in field editing mode
-                            // Otherwise, do nothing (h is not used for navigation in forms)
-                            if state.is_field_editing_mode()
-                                && !matches!(
-                                    state.get_edit_form_state(),
-                                    Some(crate::state::EditFormState::Assignee)
-                                        | Some(crate::state::EditFormState::Section)
-                                )
-                            {
-                                // In form text fields, allow typing 'h' (only in field editing mode)
-                                match state.get_edit_form_state() {
-                                    Some(crate::state::EditFormState::Name) => {
-                                        state.add_form_name_char('h');
-                                    }
-                                    Some(crate::state::EditFormState::Notes) => {
-                                        // Already handled above
-                                    }
-                                    Some(crate::state::EditFormState::DueDate) => {
-                                        state.add_form_due_on_char('h');
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            // If not in field editing mode, h does nothing in forms
-                        } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
-                            // In task detail view, navigate to previous panel
-                            debug!("Processing previous task panel event '{:?}'...", event);
-                            state.previous_task_panel();
-                        } else if matches!(state.current_view(), crate::state::View::ProjectTasks)
-                            && *state.current_focus() == Focus::View
+                        ) && state.is_field_editing_mode()
+                            && !matches!(
+                                state.get_edit_form_state(),
+                                Some(crate::state::EditFormState::Assignee)
+                                    | Some(crate::state::EditFormState::Section)
+                            )
                         {
-                            // In kanban view with View focus, navigate to previous column
-                            debug!("Processing previous kanban column event '{:?}'...", event);
-                            state.previous_kanban_column();
-                        } else {
-                            // In normal mode (Welcome view) or Menu focus, navigate menu
-                            match state.current_focus() {
-                                Focus::Menu => {
-                                    debug!("Processing previous menu event '{:?}'...", event);
-                                    state.previous_menu();
+                            // In form text fields, allow typing 'h'
+                            match state.get_edit_form_state() {
+                                Some(crate::state::EditFormState::Name) => {
+                                    state.add_form_name_char('h');
                                 }
-                                Focus::View => {
-                                    // If we're in Welcome view but focus is View, switch to Menu focus
-                                    if matches!(state.current_view(), crate::state::View::Welcome) {
-                                        state.focus_menu();
+                                Some(crate::state::EditFormState::Notes) => {
+                                    // Already handled above
+                                }
+                                Some(crate::state::EditFormState::DueDate) => {
+                                    state.add_form_due_on_char('h');
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            // Check hotkey for navigation actions
+                            if let Some(
+                                HotkeyAction::NavigateColumnPrev
+                                | HotkeyAction::NavigateMenuLeft
+                                | HotkeyAction::SwitchPanelPrev,
+                            ) = get_action_for_event(
+                                &event,
+                                state.current_view(),
+                                state.get_hotkeys(),
+                            ) {
+                                // Handle based on current view
+                                if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                                    debug!("Processing previous task panel event '{:?}'...", event);
+                                    state.previous_task_panel();
+                                } else if matches!(
+                                    state.current_view(),
+                                    crate::state::View::ProjectTasks
+                                ) && *state.current_focus() == Focus::View
+                                {
+                                    debug!(
+                                        "Processing previous kanban column event '{:?}'...",
+                                        event
+                                    );
+                                    state.previous_kanban_column();
+                                } else {
+                                    match state.current_focus() {
+                                        Focus::Menu => {
+                                            debug!(
+                                                "Processing previous menu event '{:?}'...",
+                                                event
+                                            );
+                                            state.previous_menu();
+                                        }
+                                        Focus::View => {
+                                            if matches!(
+                                                state.current_view(),
+                                                crate::state::View::Welcome
+                                            ) {
+                                                state.focus_menu();
+                                                state.previous_menu();
+                                            }
+                                        }
+                                    }
+                                }
+                                return Ok(true);
+                            }
+                            // Fallback to existing logic
+                            if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                                debug!("Processing previous task panel event '{:?}'...", event);
+                                state.previous_task_panel();
+                            } else if matches!(
+                                state.current_view(),
+                                crate::state::View::ProjectTasks
+                            ) && *state.current_focus() == Focus::View
+                            {
+                                debug!("Processing previous kanban column event '{:?}'...", event);
+                                state.previous_kanban_column();
+                            } else {
+                                match state.current_focus() {
+                                    Focus::Menu => {
+                                        debug!("Processing previous menu event '{:?}'...", event);
                                         state.previous_menu();
+                                    }
+                                    Focus::View => {
+                                        if matches!(
+                                            state.current_view(),
+                                            crate::state::View::Welcome
+                                        ) {
+                                            state.focus_menu();
+                                            state.previous_menu();
+                                        }
                                     }
                                 }
                             }
@@ -921,58 +1236,98 @@ impl Handler {
                         modifiers: KeyModifiers::NONE,
                         ..
                     } => {
+                        // Handle special modes first
                         if state.is_search_mode() {
                             state.add_search_char('l');
                         } else if matches!(
                             state.current_view(),
                             crate::state::View::CreateTask | crate::state::View::EditTask
-                        ) {
-                            // In CreateTask/EditTask view, l should only type if in field editing mode
-                            // Otherwise, do nothing (l is not used for navigation in forms)
-                            if state.is_field_editing_mode()
-                                && !matches!(
-                                    state.get_edit_form_state(),
-                                    Some(crate::state::EditFormState::Assignee)
-                                        | Some(crate::state::EditFormState::Section)
-                                )
-                            {
-                                // In form text fields, allow typing 'l' (only in field editing mode)
-                                match state.get_edit_form_state() {
-                                    Some(crate::state::EditFormState::Name) => {
-                                        state.add_form_name_char('l');
-                                    }
-                                    Some(crate::state::EditFormState::Notes) => {
-                                        // Already handled above
-                                    }
-                                    Some(crate::state::EditFormState::DueDate) => {
-                                        state.add_form_due_on_char('l');
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            // If not in field editing mode, l does nothing in forms
-                        } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
-                            // In task detail view, navigate to next panel
-                            debug!("Processing next task panel event '{:?}'...", event);
-                            state.next_task_panel();
-                        } else if matches!(state.current_view(), crate::state::View::ProjectTasks)
-                            && *state.current_focus() == Focus::View
+                        ) && state.is_field_editing_mode()
+                            && !matches!(
+                                state.get_edit_form_state(),
+                                Some(crate::state::EditFormState::Assignee)
+                                    | Some(crate::state::EditFormState::Section)
+                            )
                         {
-                            // In kanban view with View focus, navigate to next column
-                            debug!("Processing next kanban column event '{:?}'...", event);
-                            state.next_kanban_column();
-                        } else {
-                            // In normal mode (Welcome view) or Menu focus, navigate menu
-                            match state.current_focus() {
-                                Focus::Menu => {
-                                    debug!("Processing next menu event '{:?}'...", event);
-                                    state.next_menu();
+                            // In form text fields, allow typing 'l'
+                            match state.get_edit_form_state() {
+                                Some(crate::state::EditFormState::Name) => {
+                                    state.add_form_name_char('l');
                                 }
-                                Focus::View => {
-                                    // If we're in Welcome view but focus is View, switch to Menu focus
-                                    if matches!(state.current_view(), crate::state::View::Welcome) {
-                                        state.focus_menu();
+                                Some(crate::state::EditFormState::Notes) => {
+                                    // Already handled above
+                                }
+                                Some(crate::state::EditFormState::DueDate) => {
+                                    state.add_form_due_on_char('l');
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            // Check hotkey for navigation actions
+                            if let Some(
+                                HotkeyAction::NavigateColumnNext
+                                | HotkeyAction::NavigateMenuRight
+                                | HotkeyAction::SwitchPanelNext,
+                            ) = get_action_for_event(
+                                &event,
+                                state.current_view(),
+                                state.get_hotkeys(),
+                            ) {
+                                // Handle based on current view
+                                if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                                    debug!("Processing next task panel event '{:?}'...", event);
+                                    state.next_task_panel();
+                                } else if matches!(
+                                    state.current_view(),
+                                    crate::state::View::ProjectTasks
+                                ) && *state.current_focus() == Focus::View
+                                {
+                                    debug!("Processing next kanban column event '{:?}'...", event);
+                                    state.next_kanban_column();
+                                } else {
+                                    match state.current_focus() {
+                                        Focus::Menu => {
+                                            debug!("Processing next menu event '{:?}'...", event);
+                                            state.next_menu();
+                                        }
+                                        Focus::View => {
+                                            if matches!(
+                                                state.current_view(),
+                                                crate::state::View::Welcome
+                                            ) {
+                                                state.focus_menu();
+                                                state.next_menu();
+                                            }
+                                        }
+                                    }
+                                }
+                                return Ok(true);
+                            }
+                            // Fallback to existing logic
+                            if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                                debug!("Processing next task panel event '{:?}'...", event);
+                                state.next_task_panel();
+                            } else if matches!(
+                                state.current_view(),
+                                crate::state::View::ProjectTasks
+                            ) && *state.current_focus() == Focus::View
+                            {
+                                debug!("Processing next kanban column event '{:?}'...", event);
+                                state.next_kanban_column();
+                            } else {
+                                match state.current_focus() {
+                                    Focus::Menu => {
+                                        debug!("Processing next menu event '{:?}'...", event);
                                         state.next_menu();
+                                    }
+                                    Focus::View => {
+                                        if matches!(
+                                            state.current_view(),
+                                            crate::state::View::Welcome
+                                        ) {
+                                            state.focus_menu();
+                                            state.next_menu();
+                                        }
                                     }
                                 }
                             }
@@ -983,17 +1338,46 @@ impl Handler {
                         modifiers: KeyModifiers::NONE,
                         ..
                     } => {
+                        // Handle special modes first (they take priority over hotkeys)
                         if state.is_search_mode() {
                             state.add_search_char('k');
                         } else if state.has_theme_selector() {
-                            // In theme selector modal, navigate themes FIRST
+                            if let Some(HotkeyAction::ThemeSelectorNavigatePrev) =
+                                get_action_for_special_mode(
+                                    &event,
+                                    SpecialMode::ThemeSelector,
+                                    state.get_hotkeys(),
+                                )
+                            {
+                                debug!(
+                                    "Processing previous theme in theme selector event '{:?}'...",
+                                    event
+                                );
+                                state.previous_theme();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!(
                                 "Processing previous theme in theme selector event '{:?}'...",
                                 event
                             );
                             state.previous_theme();
                         } else if state.has_move_task() {
-                            // In move task modal, navigate sections FIRST - prevent background task scrolling
+                            if let Some(HotkeyAction::MoveTaskNavigatePrev) =
+                                get_action_for_special_mode(
+                                    &event,
+                                    SpecialMode::MoveTask,
+                                    state.get_hotkeys(),
+                                )
+                            {
+                                debug!(
+                                    "Processing previous section in move modal event '{:?}'...",
+                                    event
+                                );
+                                state.previous_section();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!(
                                 "Processing previous section in move modal event '{:?}'...",
                                 event
@@ -1009,7 +1393,7 @@ impl Handler {
                                     | Some(crate::state::EditFormState::Section)
                             )
                         {
-                            // In form text fields, allow typing 'k' (only in field editing mode)
+                            // In form text fields, allow typing 'k'
                             match state.get_edit_form_state() {
                                 Some(crate::state::EditFormState::Name) => {
                                     state.add_form_name_char('k');
@@ -1023,84 +1407,211 @@ impl Handler {
                                 _ => {}
                             }
                         } else if state.is_debug_mode() {
+                            if let Some(HotkeyAction::DebugModeNavigatePrev) =
+                                get_action_for_special_mode(
+                                    &event,
+                                    SpecialMode::Debug,
+                                    state.get_hotkeys(),
+                                )
+                            {
+                                debug!("Processing previous debug event '{:?}'...", event);
+                                state.previous_debug();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!("Processing previous debug event '{:?}'...", event);
                             state.previous_debug();
                         } else if state.is_comment_input_mode() {
-                            // In comment input mode, 'k' should be typed, not scroll
                             state.add_comment_char('k');
-                        } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
-                            // In task detail view, scroll the current panel
-                            match state.get_current_task_panel() {
-                                crate::state::TaskDetailPanel::Comments => {
-                                    // Scroll comments up
-                                    debug!("Processing scroll comments up event '{:?}'...", event);
-                                    state.scroll_comments_up();
-                                }
-                                crate::state::TaskDetailPanel::Details => {
-                                    // Scroll details up
-                                    state.scroll_details_up();
-                                }
-                                crate::state::TaskDetailPanel::Notes => {
-                                    // Scroll notes up
-                                    state.scroll_notes_up();
-                                }
-                            }
-                        } else if matches!(state.current_view(), crate::state::View::ProjectTasks) {
-                            // In kanban view, navigate to previous task
-                            debug!("Processing previous kanban task event '{:?}'...", event);
-                            state.previous_kanban_task();
-                        } else if matches!(
-                            state.current_view(),
-                            crate::state::View::CreateTask | crate::state::View::EditTask
-                        ) {
-                            // Handle form scrolling or dropdown navigation
-                            if !state.is_field_editing_mode() {
-                                // When not editing, j/k scrolls through form fields
-                                state.scroll_form_up();
-                            } else {
-                                // When editing, handle dropdown navigation
-                                match state.get_edit_form_state() {
-                                    Some(crate::state::EditFormState::Assignee) => {
-                                        debug!(
-                                            "Processing previous assignee event '{:?}'...",
-                                            event
-                                        );
-                                        state.previous_assignee();
-                                    }
-                                    Some(crate::state::EditFormState::Section) => {
-                                        debug!(
-                                            "Processing previous section event '{:?}'...",
-                                            event
-                                        );
-                                        state.previous_section();
-                                    }
-                                    _ => {}
-                                }
-                            }
                         } else {
-                            match state.current_focus() {
-                                Focus::Menu => {
-                                    debug!("Processing previous menu item event '{:?}'...", event);
-                                    match state.current_menu() {
-                                        Menu::Status => (),
-                                        Menu::Shortcuts => {
-                                            state.previous_shortcut_index();
+                            // Check hotkey for navigation actions
+                            if let Some(action) = get_action_for_event(
+                                &event,
+                                state.current_view(),
+                                state.get_hotkeys(),
+                            ) {
+                                match action {
+                                    HotkeyAction::NavigateTaskPrev
+                                    | HotkeyAction::NavigateMenuPrev
+                                    | HotkeyAction::NavigateFieldPrev => {
+                                        // Handle based on current view
+                                        if matches!(
+                                            state.current_view(),
+                                            crate::state::View::TaskDetail
+                                        ) {
+                                            match state.get_current_task_panel() {
+                                                crate::state::TaskDetailPanel::Comments => {
+                                                    debug!("Processing scroll comments up event '{:?}'...", event);
+                                                    state.scroll_comments_up();
+                                                }
+                                                crate::state::TaskDetailPanel::Details => {
+                                                    state.scroll_details_up();
+                                                }
+                                                crate::state::TaskDetailPanel::Notes => {
+                                                    state.scroll_notes_up();
+                                                }
+                                            }
+                                        } else if matches!(
+                                            state.current_view(),
+                                            crate::state::View::ProjectTasks
+                                        ) {
+                                            debug!(
+                                                "Processing previous kanban task event '{:?}'...",
+                                                event
+                                            );
+                                            state.previous_kanban_task();
+                                        } else if matches!(
+                                            state.current_view(),
+                                            crate::state::View::CreateTask
+                                                | crate::state::View::EditTask
+                                        ) {
+                                            if !state.is_field_editing_mode() {
+                                                state.scroll_form_up();
+                                            } else {
+                                                match state.get_edit_form_state() {
+                                                    Some(crate::state::EditFormState::Assignee) => {
+                                                        debug!("Processing previous assignee event '{:?}'...", event);
+                                                        state.previous_assignee();
+                                                    }
+                                                    Some(crate::state::EditFormState::Section) => {
+                                                        debug!("Processing previous section event '{:?}'...", event);
+                                                        state.previous_section();
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                        } else {
+                                            match state.current_focus() {
+                                                Focus::Menu => {
+                                                    debug!("Processing previous menu item event '{:?}'...", event);
+                                                    match state.current_menu() {
+                                                        Menu::Status => (),
+                                                        Menu::Shortcuts => {
+                                                            state.previous_shortcut_index();
+                                                        }
+                                                        Menu::TopList => {
+                                                            state.previous_top_list_index();
+                                                        }
+                                                    }
+                                                }
+                                                Focus::View => {
+                                                    if !matches!(
+                                                        state.current_view(),
+                                                        crate::state::View::Welcome
+                                                    ) {
+                                                        debug!("Processing previous task event '{:?}'...", event);
+                                                        state.previous_task_index();
+                                                    } else {
+                                                        state.focus_menu();
+                                                    }
+                                                }
+                                            }
                                         }
-                                        Menu::TopList => {
-                                            state.previous_top_list_index();
+                                        return Ok(true);
+                                    }
+                                    HotkeyAction::ScrollUp => {
+                                        if matches!(
+                                            state.current_view(),
+                                            crate::state::View::TaskDetail
+                                        ) {
+                                            match state.get_current_task_panel() {
+                                                crate::state::TaskDetailPanel::Comments => {
+                                                    debug!("Processing scroll comments up event '{:?}'...", event);
+                                                    state.scroll_comments_up();
+                                                }
+                                                crate::state::TaskDetailPanel::Details => {
+                                                    state.scroll_details_up();
+                                                }
+                                                crate::state::TaskDetailPanel::Notes => {
+                                                    state.scroll_notes_up();
+                                                }
+                                            }
+                                            return Ok(true);
                                         }
                                     }
+                                    _ => {
+                                        // Other actions - fall through to existing logic
+                                    }
                                 }
-                                Focus::View => {
-                                    // Only navigate tasks if we're in a view that has tasks
-                                    // (not Welcome view)
-                                    if !matches!(state.current_view(), crate::state::View::Welcome)
-                                    {
-                                        debug!("Processing previous task event '{:?}'...", event);
-                                        state.previous_task_index();
-                                    } else {
-                                        // In Welcome view with View focus, switch to Menu focus
-                                        state.focus_menu();
+                            }
+                            // Fallback to existing logic if no hotkey matched
+                            if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                                match state.get_current_task_panel() {
+                                    crate::state::TaskDetailPanel::Comments => {
+                                        debug!(
+                                            "Processing scroll comments up event '{:?}'...",
+                                            event
+                                        );
+                                        state.scroll_comments_up();
+                                    }
+                                    crate::state::TaskDetailPanel::Details => {
+                                        state.scroll_details_up();
+                                    }
+                                    crate::state::TaskDetailPanel::Notes => {
+                                        state.scroll_notes_up();
+                                    }
+                                }
+                            } else if matches!(
+                                state.current_view(),
+                                crate::state::View::ProjectTasks
+                            ) {
+                                debug!("Processing previous kanban task event '{:?}'...", event);
+                                state.previous_kanban_task();
+                            } else if matches!(
+                                state.current_view(),
+                                crate::state::View::CreateTask | crate::state::View::EditTask
+                            ) {
+                                if !state.is_field_editing_mode() {
+                                    state.scroll_form_up();
+                                } else {
+                                    match state.get_edit_form_state() {
+                                        Some(crate::state::EditFormState::Assignee) => {
+                                            debug!(
+                                                "Processing previous assignee event '{:?}'...",
+                                                event
+                                            );
+                                            state.previous_assignee();
+                                        }
+                                        Some(crate::state::EditFormState::Section) => {
+                                            debug!(
+                                                "Processing previous section event '{:?}'...",
+                                                event
+                                            );
+                                            state.previous_section();
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            } else {
+                                match state.current_focus() {
+                                    Focus::Menu => {
+                                        debug!(
+                                            "Processing previous menu item event '{:?}'...",
+                                            event
+                                        );
+                                        match state.current_menu() {
+                                            Menu::Status => (),
+                                            Menu::Shortcuts => {
+                                                state.previous_shortcut_index();
+                                            }
+                                            Menu::TopList => {
+                                                state.previous_top_list_index();
+                                            }
+                                        }
+                                    }
+                                    Focus::View => {
+                                        if !matches!(
+                                            state.current_view(),
+                                            crate::state::View::Welcome
+                                        ) {
+                                            debug!(
+                                                "Processing previous task event '{:?}'...",
+                                                event
+                                            );
+                                            state.previous_task_index();
+                                        } else {
+                                            state.focus_menu();
+                                        }
                                     }
                                 }
                             }
@@ -1111,17 +1622,46 @@ impl Handler {
                         modifiers: KeyModifiers::NONE,
                         ..
                     } => {
+                        // Handle special modes first (they take priority over hotkeys)
                         if state.is_search_mode() {
                             state.add_search_char('j');
                         } else if state.has_theme_selector() {
-                            // In theme selector modal, navigate themes FIRST
+                            if let Some(HotkeyAction::ThemeSelectorNavigateNext) =
+                                get_action_for_special_mode(
+                                    &event,
+                                    SpecialMode::ThemeSelector,
+                                    state.get_hotkeys(),
+                                )
+                            {
+                                debug!(
+                                    "Processing next theme in theme selector event '{:?}'...",
+                                    event
+                                );
+                                state.next_theme();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!(
                                 "Processing next theme in theme selector event '{:?}'...",
                                 event
                             );
                             state.next_theme();
                         } else if state.has_move_task() {
-                            // In move task modal, navigate sections FIRST - prevent background task scrolling
+                            if let Some(HotkeyAction::MoveTaskNavigateNext) =
+                                get_action_for_special_mode(
+                                    &event,
+                                    SpecialMode::MoveTask,
+                                    state.get_hotkeys(),
+                                )
+                            {
+                                debug!(
+                                    "Processing next section in move modal event '{:?}'...",
+                                    event
+                                );
+                                state.next_section();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!(
                                 "Processing next section in move modal event '{:?}'...",
                                 event
@@ -1151,75 +1691,212 @@ impl Handler {
                                 _ => {}
                             }
                         } else if state.is_debug_mode() {
+                            if let Some(HotkeyAction::DebugModeNavigateNext) =
+                                get_action_for_special_mode(
+                                    &event,
+                                    SpecialMode::Debug,
+                                    state.get_hotkeys(),
+                                )
+                            {
+                                debug!("Processing next debug event '{:?}'...", event);
+                                state.next_debug();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!("Processing next debug event '{:?}'...", event);
                             state.next_debug();
                         } else if state.is_comment_input_mode() {
                             // In comment input mode, 'j' should be typed, not scroll
                             state.add_comment_char('j');
-                        } else if matches!(state.current_view(), crate::state::View::TaskDetail) {
-                            // In task detail view, scroll the current panel
-                            match state.get_current_task_panel() {
-                                crate::state::TaskDetailPanel::Comments => {
-                                    // Scroll comments down
-                                    debug!(
+                        } else {
+                            // Check hotkey for navigation actions
+                            if let Some(action) = get_action_for_event(
+                                &event,
+                                state.current_view(),
+                                state.get_hotkeys(),
+                            ) {
+                                match action {
+                                    HotkeyAction::NavigateTaskNext
+                                    | HotkeyAction::NavigateMenuNext
+                                    | HotkeyAction::NavigateFieldNext => {
+                                        // Handle based on current view
+                                        if matches!(
+                                            state.current_view(),
+                                            crate::state::View::TaskDetail
+                                        ) {
+                                            // In task detail view, scroll the current panel
+                                            match state.get_current_task_panel() {
+                                                crate::state::TaskDetailPanel::Comments => {
+                                                    debug!(
                                         "Processing scroll comments down event '{:?}'...",
                                         event
                                     );
-                                    state.scroll_comments_down();
-                                }
-                                crate::state::TaskDetailPanel::Details => {
-                                    // Scroll details down
-                                    state.scroll_details_down();
-                                }
-                                crate::state::TaskDetailPanel::Notes => {
-                                    // Scroll notes down
-                                    state.scroll_notes_down();
-                                }
-                            }
-                        } else if matches!(state.current_view(), crate::state::View::ProjectTasks) {
-                            // In kanban view, navigate to next task
-                            debug!("Processing next kanban task event '{:?}'...", event);
-                            state.next_kanban_task();
-                        } else if matches!(
-                            state.current_view(),
-                            crate::state::View::CreateTask | crate::state::View::EditTask
-                        ) {
-                            // Handle dropdown navigation in forms
-                            match state.get_edit_form_state() {
-                                Some(crate::state::EditFormState::Assignee) => {
-                                    debug!("Processing next assignee event '{:?}'...", event);
-                                    state.next_assignee();
-                                }
-                                Some(crate::state::EditFormState::Section) => {
-                                    debug!("Processing next section event '{:?}'...", event);
-                                    state.next_section();
-                                }
-                                _ => {}
-                            }
-                        } else {
-                            match state.current_focus() {
-                                Focus::Menu => {
-                                    debug!("Processing next menu item event '{:?}'...", event);
-                                    match state.current_menu() {
-                                        Menu::Status => (),
-                                        Menu::Shortcuts => {
-                                            state.next_shortcut_index();
+                                                    state.scroll_comments_down();
+                                                }
+                                                crate::state::TaskDetailPanel::Details => {
+                                                    state.scroll_details_down();
+                                                }
+                                                crate::state::TaskDetailPanel::Notes => {
+                                                    state.scroll_notes_down();
+                                                }
+                                            }
+                                        } else if matches!(
+                                            state.current_view(),
+                                            crate::state::View::ProjectTasks
+                                        ) {
+                                            debug!(
+                                                "Processing next kanban task event '{:?}'...",
+                                                event
+                                            );
+                                            state.next_kanban_task();
+                                        } else if matches!(
+                                            state.current_view(),
+                                            crate::state::View::CreateTask
+                                                | crate::state::View::EditTask
+                                        ) {
+                                            // Handle dropdown navigation in forms
+                                            match state.get_edit_form_state() {
+                                                Some(crate::state::EditFormState::Assignee) => {
+                                                    debug!(
+                                                        "Processing next assignee event '{:?}'...",
+                                                        event
+                                                    );
+                                                    state.next_assignee();
+                                                }
+                                                Some(crate::state::EditFormState::Section) => {
+                                                    debug!(
+                                                        "Processing next section event '{:?}'...",
+                                                        event
+                                                    );
+                                                    state.next_section();
+                                                }
+                                                _ => {}
+                                            }
+                                        } else {
+                                            match state.current_focus() {
+                                                Focus::Menu => {
+                                                    debug!(
+                                                        "Processing next menu item event '{:?}'...",
+                                                        event
+                                                    );
+                                                    match state.current_menu() {
+                                                        Menu::Status => (),
+                                                        Menu::Shortcuts => {
+                                                            state.next_shortcut_index();
+                                                        }
+                                                        Menu::TopList => {
+                                                            state.next_top_list_index();
+                                                        }
+                                                    }
+                                                }
+                                                Focus::View => {
+                                                    if !matches!(
+                                                        state.current_view(),
+                                                        crate::state::View::Welcome
+                                                    ) {
+                                                        debug!(
+                                                            "Processing next task event '{:?}'...",
+                                                            event
+                                                        );
+                                                        state.next_task_index();
+                                                    } else {
+                                                        state.focus_menu();
+                                                    }
+                                                }
+                                            }
                                         }
-                                        Menu::TopList => {
-                                            state.next_top_list_index();
+                                        return Ok(true);
+                                    }
+                                    HotkeyAction::ScrollDown => {
+                                        if matches!(
+                                            state.current_view(),
+                                            crate::state::View::TaskDetail
+                                        ) {
+                                            match state.get_current_task_panel() {
+                                                crate::state::TaskDetailPanel::Comments => {
+                                                    debug!(
+                                                        "Processing scroll comments down event '{:?}'...",
+                                                        event
+                                                    );
+                                                    state.scroll_comments_down();
+                                                }
+                                                crate::state::TaskDetailPanel::Details => {
+                                                    state.scroll_details_down();
+                                                }
+                                                crate::state::TaskDetailPanel::Notes => {
+                                                    state.scroll_notes_down();
+                                                }
+                                            }
+                                            return Ok(true);
                                         }
                                     }
+                                    _ => {
+                                        // Other actions - fall through to existing logic
+                                    }
                                 }
-                                Focus::View => {
-                                    // Only navigate tasks if we're in a view that has tasks
-                                    // (not Welcome view)
-                                    if !matches!(state.current_view(), crate::state::View::Welcome)
-                                    {
-                                        debug!("Processing next task event '{:?}'...", event);
-                                        state.next_task_index();
-                                    } else {
-                                        // In Welcome view with View focus, switch to Menu focus
-                                        state.focus_menu();
+                            }
+                            // Fallback to existing logic if no hotkey matched
+                            if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                                match state.get_current_task_panel() {
+                                    crate::state::TaskDetailPanel::Comments => {
+                                        debug!(
+                                            "Processing scroll comments down event '{:?}'...",
+                                            event
+                                        );
+                                        state.scroll_comments_down();
+                                    }
+                                    crate::state::TaskDetailPanel::Details => {
+                                        state.scroll_details_down();
+                                    }
+                                    crate::state::TaskDetailPanel::Notes => {
+                                        state.scroll_notes_down();
+                                    }
+                                }
+                            } else if matches!(
+                                state.current_view(),
+                                crate::state::View::ProjectTasks
+                            ) {
+                                debug!("Processing next kanban task event '{:?}'...", event);
+                                state.next_kanban_task();
+                            } else if matches!(
+                                state.current_view(),
+                                crate::state::View::CreateTask | crate::state::View::EditTask
+                            ) {
+                                match state.get_edit_form_state() {
+                                    Some(crate::state::EditFormState::Assignee) => {
+                                        debug!("Processing next assignee event '{:?}'...", event);
+                                        state.next_assignee();
+                                    }
+                                    Some(crate::state::EditFormState::Section) => {
+                                        debug!("Processing next section event '{:?}'...", event);
+                                        state.next_section();
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                match state.current_focus() {
+                                    Focus::Menu => {
+                                        debug!("Processing next menu item event '{:?}'...", event);
+                                        match state.current_menu() {
+                                            Menu::Status => (),
+                                            Menu::Shortcuts => {
+                                                state.next_shortcut_index();
+                                            }
+                                            Menu::TopList => {
+                                                state.next_top_list_index();
+                                            }
+                                        }
+                                    }
+                                    Focus::View => {
+                                        if !matches!(
+                                            state.current_view(),
+                                            crate::state::View::Welcome
+                                        ) {
+                                            debug!("Processing next task event '{:?}'...", event);
+                                            state.next_task_index();
+                                        } else {
+                                            state.focus_menu();
+                                        }
                                     }
                                 }
                             }
@@ -1248,11 +1925,48 @@ impl Handler {
                             debug!("Processing exit debug mode (Enter) event '{:?}'...", event);
                             state.exit_debug_mode();
                         } else if state.has_theme_selector() {
-                            // In theme selector modal, Enter selects the theme
+                            if let Some(HotkeyAction::ThemeSelectorSelect) =
+                                get_action_for_special_mode(
+                                    &event,
+                                    SpecialMode::ThemeSelector,
+                                    state.get_hotkeys(),
+                                )
+                            {
+                                debug!("Processing select theme event '{:?}'...", event);
+                                state.select_theme();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!("Processing select theme event '{:?}'...", event);
                             state.select_theme();
                         } else if state.has_move_task() {
-                            // In move task modal, Enter selects the section and moves the task
+                            if let Some(HotkeyAction::MoveTaskConfirm) = get_action_for_special_mode(
+                                &event,
+                                SpecialMode::MoveTask,
+                                state.get_hotkeys(),
+                            ) {
+                                // In move task modal, Enter selects the section and moves the task
+                                if let Some(task_gid) = state.get_move_task_gid() {
+                                    let sections = state.get_sections();
+                                    let selected_index = state.get_section_dropdown_index();
+                                    if selected_index < sections.len() {
+                                        let selected_section = &sections[selected_index];
+                                        debug!(
+                                            "Moving task {} to section {}...",
+                                            task_gid, selected_section.gid
+                                        );
+                                        state.dispatch(
+                                            crate::events::network::Event::MoveTaskToSection {
+                                                task_gid: task_gid.clone(),
+                                                section_gid: selected_section.gid.clone(),
+                                            },
+                                        );
+                                        state.clear_move_task();
+                                    }
+                                }
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             if let Some(task_gid) = state.get_move_task_gid() {
                                 let sections = state.get_sections();
                                 let selected_index = state.get_section_dropdown_index();
@@ -1272,7 +1986,16 @@ impl Handler {
                                 }
                             }
                         } else if state.has_delete_confirmation() {
-                            // Confirm delete - works for all views (list, kanban, detail)
+                            if let Some(HotkeyAction::DeleteConfirm) = get_action_for_special_mode(
+                                &event,
+                                SpecialMode::DeleteConfirmation,
+                                state.get_hotkeys(),
+                            ) {
+                                debug!("Processing confirm delete event '{:?}'...", event);
+                                state.confirm_delete_task();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!("Processing confirm delete event '{:?}'...", event);
                             state.confirm_delete_task();
                         } else if state.is_comment_input_mode() {
@@ -1758,9 +2481,29 @@ impl Handler {
                         ..
                     } => {
                         if state.is_search_mode() {
+                            if let Some(HotkeyAction::SearchModeExit) = get_action_for_special_mode(
+                                &event,
+                                SpecialMode::Search,
+                                state.get_hotkeys(),
+                            ) {
+                                debug!("Processing exit search mode (/) event '{:?}'...", event);
+                                state.exit_search_mode();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!("Processing exit search mode (/) event '{:?}'...", event);
                             state.exit_search_mode();
                         } else if state.is_debug_mode() {
+                            if let Some(HotkeyAction::DebugModeExit) = get_action_for_special_mode(
+                                &event,
+                                SpecialMode::Debug,
+                                state.get_hotkeys(),
+                            ) {
+                                debug!("Processing exit debug mode (/) event '{:?}'...", event);
+                                state.exit_debug_mode();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!("Processing exit debug mode (/) event '{:?}'...", event);
                             state.exit_debug_mode();
                         } else {
@@ -1778,6 +2521,35 @@ impl Handler {
                         ..
                     } => {
                         if state.is_debug_mode() {
+                            if let Some(HotkeyAction::DebugModeCopyLog) =
+                                get_action_for_special_mode(
+                                    &event,
+                                    SpecialMode::Debug,
+                                    state.get_hotkeys(),
+                                )
+                            {
+                                debug!("Processing copy debug log event '{:?}'...", event);
+                                if let Some(debug_entry) = state.get_current_debug() {
+                                    // Copy to clipboard
+                                    match ClipboardContext::new() {
+                                        Ok(mut ctx) => {
+                                            match ctx.set_contents(debug_entry.to_string()) {
+                                                Ok(_) => {
+                                                    info!("Debug log entry copied to clipboard");
+                                                }
+                                                Err(e) => {
+                                                    warn!("Failed to copy to clipboard: {}", e);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            warn!("Failed to initialize clipboard: {}", e);
+                                        }
+                                    }
+                                }
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
                             debug!("Processing copy debug log event '{:?}'...", event);
                             if let Some(debug_entry) = state.get_current_debug() {
                                 // Copy to clipboard
@@ -1837,11 +2609,28 @@ impl Handler {
                             state.add_search_char('t');
                         } else if !state.is_debug_mode()
                             && !state.has_theme_selector()
+                            && !state.has_hotkey_editor()
                             && matches!(state.current_view(), crate::state::View::Welcome)
                         {
                             // Open theme selector modal (only available on welcome screen)
                             debug!("Opening theme selector modal...");
                             state.open_theme_selector();
+                        }
+                    }
+                    KeyEvent {
+                        code: KeyCode::Char('?'),
+                        modifiers: KeyModifiers::NONE,
+                        ..
+                    } => {
+                        if state.is_search_mode() {
+                            state.add_search_char('?');
+                        } else if !state.is_debug_mode()
+                            && !state.has_theme_selector()
+                            && !state.has_hotkey_editor()
+                        {
+                            // Open hotkey editor modal (available from any view)
+                            debug!("Opening hotkey editor modal...");
+                            state.open_hotkey_editor();
                         }
                     }
                     KeyEvent {

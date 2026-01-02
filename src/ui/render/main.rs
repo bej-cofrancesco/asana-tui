@@ -1,3 +1,4 @@
+use super::hotkey_editor;
 use super::welcome;
 use super::{create_task, edit_task, kanban, task_detail, Frame};
 use crate::state::{State, View};
@@ -56,6 +57,11 @@ pub fn main(frame: &mut Frame, size: Rect, state: &mut State) {
     // Render theme selector modal on top of everything (only on Welcome view)
     if state.has_theme_selector() && matches!(state.current_view(), View::Welcome) {
         render_theme_selector_modal(frame, size, state);
+    }
+
+    // Render hotkey editor modal on top of everything
+    if state.has_hotkey_editor() {
+        hotkey_editor::render_hotkey_editor(frame, size, state);
     }
 }
 
