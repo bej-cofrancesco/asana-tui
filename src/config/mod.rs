@@ -7,7 +7,7 @@ mod error;
 pub mod hotkeys;
 
 pub use error::ConfigError;
-pub use hotkeys::{get_action_for_special_mode, Hotkey, HotkeyAction, SpecialMode, ViewHotkeys};
+pub use hotkeys::{get_action_for_special_mode, HotkeyAction, SpecialMode, ViewHotkeys};
 
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
@@ -101,7 +101,8 @@ impl Config {
             self.starred_projects = data.starred_projects;
             self.starred_project_names = data.starred_project_names;
             self.theme_name = data.theme_name;
-            self.hotkeys = data.hotkeys;
+            // Merge user overrides with defaults
+            self.hotkeys = ViewHotkeys::merge_with_defaults(&data.hotkeys);
         }
         // Otherwise, leave access_token as None - will be handled in TUI onboarding
         // Don't prompt via stdin, let the TUI handle it
@@ -119,12 +120,14 @@ impl Config {
             .as_ref()
             .ok_or(ConfigError::AccessTokenNotSet)?;
 
+        // Only save hotkey overrides (non-default values)
+        let hotkey_overrides = self.hotkeys.get_overrides();
         let data = FileSpec {
             access_token: access_token.clone(),
             starred_projects: self.starred_projects.clone(),
             starred_project_names: self.starred_project_names.clone(),
             theme_name: self.theme_name.clone(),
-            hotkeys: self.hotkeys.clone(),
+            hotkeys: hotkey_overrides,
         };
         let content = serde_yaml::to_string(&data)
             .map_err(|e| ConfigError::SerializationFailed(e.to_string()))?;
@@ -160,6 +163,8 @@ impl Config {
         if self.file_path.is_none() {
             return Err(ConfigError::FilePathNotSet.into());
         }
+        // Only save hotkey overrides (non-default values)
+        let hotkey_overrides = self.hotkeys.get_overrides();
         let data = FileSpec {
             access_token: self
                 .access_token
@@ -168,7 +173,7 @@ impl Config {
             starred_projects: self.starred_projects.clone(),
             starred_project_names: self.starred_project_names.clone(),
             theme_name: self.theme_name.clone(),
-            hotkeys: self.hotkeys.clone(),
+            hotkeys: hotkey_overrides,
         };
         let content = serde_yaml::to_string(&data)
             .map_err(|e| ConfigError::SerializationFailed(e.to_string()))?;

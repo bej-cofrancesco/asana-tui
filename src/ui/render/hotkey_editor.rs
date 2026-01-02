@@ -1,15 +1,17 @@
 //! Hotkey editor modal rendering.
 //!
-//! This module provides the UI for editing hotkey bindings per view.
+//! This module provides the UI for editing hotkey bindings grouped by category.
 
 use super::Frame;
-use crate::config::{Hotkey, HotkeyAction};
+use crate::config::hotkeys::{
+    format_hotkey_display, get_all_hotkeys_grouped, Hotkey, HotkeyAction, HotkeyGroup,
+};
 use crate::state::State;
 use crate::ui::widgets::styling;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    text::Span,
+    text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
@@ -17,74 +19,60 @@ use ratatui::{
 ///
 pub fn render_hotkey_editor(frame: &mut Frame, size: Rect, state: &State) {
     // Create a centered popup dialog using ratatui pattern
-    let popup_area = centered_rect(60, 60, size);
+    let popup_area = centered_rect(70, 75, size);
 
     // Clear the area first (ratatui modal pattern)
     frame.render_widget(Clear, popup_area);
 
-    // Get current view being edited
-    let current_view = state
-        .get_hotkey_editor_view()
-        .cloned()
-        .unwrap_or_else(|| state.current_view().clone());
+    // Get all hotkeys grouped by category
+    let grouped_hotkeys = get_all_hotkeys_grouped(state.get_hotkeys());
 
-    // Get actions for current view
-    let actions: Vec<(&HotkeyAction, &Hotkey)> = match current_view {
-        crate::state::View::Welcome => state.get_hotkeys().welcome.iter().collect::<Vec<_>>(),
-        crate::state::View::ProjectTasks => {
-            state.get_hotkeys().project_tasks.iter().collect::<Vec<_>>()
+    // Flatten into a single list with group headers
+    let mut all_items: Vec<(Option<&HotkeyGroup>, Option<&HotkeyAction>, Option<&Hotkey>)> =
+        Vec::new();
+    for (group, actions) in &grouped_hotkeys {
+        // Add group header
+        all_items.push((Some(group), None, None));
+        // Add actions in this group
+        for (action, hotkey_opt) in actions {
+            all_items.push((None, Some(action), hotkey_opt.as_ref()));
         }
-        crate::state::View::TaskDetail => {
-            state.get_hotkeys().task_detail.iter().collect::<Vec<_>>()
-        }
-        crate::state::View::CreateTask => {
-            state.get_hotkeys().create_task.iter().collect::<Vec<_>>()
-        }
-        crate::state::View::EditTask => state.get_hotkeys().edit_task.iter().collect::<Vec<_>>(),
-    };
+    }
 
     let selected_index = state.get_hotkey_editor_dropdown_index();
 
     // Split popup into title and list areas
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(7)])
+        .constraints([Constraint::Length(3), Constraint::Min(10)])
         .split(popup_area);
 
     // Title block
     let theme = state.get_theme();
-    let view_name = match current_view {
-        crate::state::View::Welcome => "Welcome",
-        crate::state::View::ProjectTasks => "Project Tasks",
-        crate::state::View::TaskDetail => "Task Detail",
-        crate::state::View::CreateTask => "Create Task",
-        crate::state::View::EditTask => "Edit Task",
+    let instructions = if state.get_hotkey_editor_selected_action().is_some() {
+        " Press a key to bind, Esc: cancel"
+    } else {
+        " j/k: navigate, Enter: edit, Esc: close"
     };
 
     let title_block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(
-            format!("Edit Hotkeys - {}", view_name),
+            "Edit Hotkeys",
             Style::default()
                 .fg(theme.info.to_color())
                 .add_modifier(Modifier::BOLD),
         ))
         .border_style(styling::active_block_border_style(theme));
 
-    let instructions = if state.get_hotkey_editor_selected_action().is_some() {
-        " Press a key to bind, Esc: cancel"
-    } else {
-        " j/k: navigate, Enter: edit, Esc: cancel"
-    };
-
     let title_text = Paragraph::new(instructions)
         .block(title_block)
         .alignment(Alignment::Center);
     frame.render_widget(title_text, chunks[0]);
 
-    // Limit visible actions to max 10 items (with scrolling)
-    let max_visible = 10;
-    let total_items = actions.len();
+    // Limit visible items to max 15 items (with scrolling)
+    let max_visible = 15;
+    let total_items = all_items.len();
     let start_index = if total_items <= max_visible {
         0
     } else {
@@ -93,38 +81,75 @@ pub fn render_hotkey_editor(frame: &mut Frame, size: Rect, state: &State) {
             .min((total_items - max_visible) as i32) as usize
     };
     let end_index = (start_index + max_visible).min(total_items);
-    let visible_actions = if actions.is_empty() {
+    let visible_items = if all_items.is_empty() {
         vec![]
     } else {
-        actions[start_index..end_index].to_vec()
+        all_items[start_index..end_index].to_vec()
     };
     let visible_selected = selected_index.saturating_sub(start_index);
 
-    // Create list items from visible actions
-    let items: Vec<ListItem> = if visible_actions.is_empty() {
+    // Create list items from visible items
+    let items: Vec<ListItem> = if visible_items.is_empty() {
         vec![ListItem::new("No hotkeys available")]
     } else {
-        visible_actions
+        visible_items
             .iter()
-            .map(|(action, hotkey)| {
-                let action_name = format_action_name(action);
-                let hotkey_str = format_hotkey(hotkey);
-                ListItem::new(format!("{}: {}", action_name, hotkey_str))
+            .map(|(group_opt, action_opt, hotkey_opt)| {
+                if let Some(group) = group_opt {
+                    // Group header
+                    ListItem::new(Line::from(vec![Span::styled(
+                        format!("▶ {} ", group.name),
+                        Style::default()
+                            .fg(theme.info.to_color())
+                            .add_modifier(Modifier::BOLD),
+                    )]))
+                } else if let Some(action) = action_opt {
+                    // Action item
+                    let action_name = format_action_name(action);
+                    let hotkey_str = if let Some(hotkey) = hotkey_opt {
+                        format_hotkey_display(hotkey)
+                    } else {
+                        "<unbound>".to_string()
+                    };
+                    let is_selected = state
+                        .get_hotkey_editor_selected_action()
+                        .as_ref()
+                        .map(|a| a == action)
+                        .unwrap_or(false);
+                    if is_selected {
+                        ListItem::new(Line::from(vec![
+                            Span::styled(
+                                format!("  {}: ", action_name),
+                                Style::default().fg(theme.warning.to_color()),
+                            ),
+                            Span::styled(
+                                "<press key>".to_string(),
+                                Style::default()
+                                    .fg(theme.warning.to_color())
+                                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                            ),
+                        ]))
+                    } else {
+                        ListItem::new(format!("  {}: {}", action_name, hotkey_str))
+                    }
+                } else {
+                    ListItem::new("")
+                }
             })
             .collect()
     };
 
     // Use ListState for proper selection display
     let mut list_state = ratatui::widgets::ListState::default();
-    if !items.is_empty() && !actions.is_empty() {
+    if !items.is_empty() && !all_items.is_empty() {
         let safe_index = visible_selected.min(items.len().saturating_sub(1));
         list_state.select(Some(safe_index));
     }
 
-    // Create list block with action count
+    // Create list block
     let list_block = Block::default()
         .borders(Borders::ALL)
-        .title(format!("Actions ({})", actions.len()))
+        .title(format!("Hotkeys ({} total)", total_items))
         .border_style(styling::active_block_border_style(theme));
 
     let list = List::new(items)
@@ -190,54 +215,6 @@ fn format_action_name(action: &HotkeyAction) -> String {
         HotkeyAction::ThemeSelectorNavigatePrev => "Theme Selector Navigate Prev".to_string(),
         HotkeyAction::ThemeSelectorSelect => "Theme Selector Select".to_string(),
         HotkeyAction::ThemeSelectorCancel => "Theme Selector Cancel".to_string(),
-    }
-}
-
-/// Helper function to format hotkey for display.
-///
-fn format_hotkey(hotkey: &Hotkey) -> String {
-    let mut parts = Vec::new();
-    if hotkey
-        .modifiers
-        .contains(crossterm::event::KeyModifiers::CONTROL)
-    {
-        parts.push("Ctrl");
-    }
-    if hotkey
-        .modifiers
-        .contains(crossterm::event::KeyModifiers::SHIFT)
-    {
-        parts.push("Shift");
-    }
-    if hotkey
-        .modifiers
-        .contains(crossterm::event::KeyModifiers::ALT)
-    {
-        parts.push("Alt");
-    }
-
-    let key_str = match &hotkey.code {
-        crossterm::event::KeyCode::Char(c) => {
-            if *c == ' ' {
-                "Space".to_string()
-            } else {
-                c.to_string()
-            }
-        }
-        crossterm::event::KeyCode::Esc => "Esc".to_string(),
-        crossterm::event::KeyCode::Enter => "Enter".to_string(),
-        crossterm::event::KeyCode::Backspace => "Backspace".to_string(),
-        crossterm::event::KeyCode::Up => "Up".to_string(),
-        crossterm::event::KeyCode::Down => "Down".to_string(),
-        crossterm::event::KeyCode::Left => "Left".to_string(),
-        crossterm::event::KeyCode::Right => "Right".to_string(),
-        _ => "Unknown".to_string(),
-    };
-
-    if parts.is_empty() {
-        key_str
-    } else {
-        format!("{}+{}", parts.join("+"), key_str)
     }
 }
 

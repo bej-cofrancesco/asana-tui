@@ -1292,12 +1292,15 @@ impl State {
         self
     }
 
-    /// Open hotkey editor modal.
+    /// Open hotkey editor modal (only from Welcome view).
     ///
     pub fn open_hotkey_editor(&mut self) -> &mut Self {
-        self.hotkey_editor_open = true;
-        self.hotkey_editor_view = Some(self.current_view().clone());
-        self.hotkey_editor_dropdown_index = 0;
+        // Only allow opening from Welcome view
+        if matches!(self.current_view(), View::Welcome) {
+            self.hotkey_editor_open = true;
+            self.hotkey_editor_view = None; // No specific view - showing all grouped
+            self.hotkey_editor_dropdown_index = 0;
+        }
         self
     }
 
@@ -1318,6 +1321,7 @@ impl State {
 
     /// Get hotkey editor view.
     ///
+    #[allow(dead_code)] // May be used in future or via reflection
     pub fn get_hotkey_editor_view(&self) -> Option<&View> {
         self.hotkey_editor_view.as_ref()
     }
@@ -1349,53 +1353,61 @@ impl State {
         self
     }
 
-    /// Navigate to next hotkey action in editor.
+    /// Navigate to next hotkey action in editor (grouped view).
     ///
     pub fn next_hotkey_action(&mut self) -> &mut Self {
-        // Get actions for current view
-        let actions = if let Some(view) = &self.hotkey_editor_view {
-            match view {
-                View::Welcome => &self.hotkeys.welcome,
-                View::ProjectTasks => &self.hotkeys.project_tasks,
-                View::TaskDetail => &self.hotkeys.task_detail,
-                View::CreateTask => &self.hotkeys.create_task,
-                View::EditTask => &self.hotkeys.edit_task,
-            }
-        } else {
-            return self;
-        };
+        use crate::config::hotkeys::get_all_hotkeys_grouped;
 
-        if !actions.is_empty() {
+        // Get all grouped hotkeys
+        let grouped = get_all_hotkeys_grouped(&self.hotkeys);
+        let total_items: usize = grouped.iter().map(|(_, actions)| 1 + actions.len()).sum();
+
+        if total_items > 0 {
             self.hotkey_editor_dropdown_index =
-                (self.hotkey_editor_dropdown_index + 1) % actions.len();
+                (self.hotkey_editor_dropdown_index + 1) % total_items;
         }
         self
     }
 
-    /// Navigate to previous hotkey action in editor.
+    /// Navigate to previous hotkey action in editor (grouped view).
     ///
     pub fn previous_hotkey_action(&mut self) -> &mut Self {
-        // Get actions for current view
-        let actions = if let Some(view) = &self.hotkey_editor_view {
-            match view {
-                View::Welcome => &self.hotkeys.welcome,
-                View::ProjectTasks => &self.hotkeys.project_tasks,
-                View::TaskDetail => &self.hotkeys.task_detail,
-                View::CreateTask => &self.hotkeys.create_task,
-                View::EditTask => &self.hotkeys.edit_task,
-            }
-        } else {
-            return self;
-        };
+        use crate::config::hotkeys::get_all_hotkeys_grouped;
 
-        if !actions.is_empty() {
+        // Get all grouped hotkeys
+        let grouped = get_all_hotkeys_grouped(&self.hotkeys);
+        let total_items: usize = grouped.iter().map(|(_, actions)| 1 + actions.len()).sum();
+
+        if total_items > 0 {
             if self.hotkey_editor_dropdown_index == 0 {
-                self.hotkey_editor_dropdown_index = actions.len() - 1;
+                self.hotkey_editor_dropdown_index = total_items - 1;
             } else {
                 self.hotkey_editor_dropdown_index -= 1;
             }
         }
         self
+    }
+
+    /// Get the action at the current index in the grouped hotkey editor.
+    ///
+    pub fn get_hotkey_action_at_index(&self, index: usize) -> Option<HotkeyAction> {
+        use crate::config::hotkeys::get_all_hotkeys_grouped;
+
+        let grouped = get_all_hotkeys_grouped(&self.hotkeys);
+        let mut current_index = 0;
+
+        for (_, actions) in &grouped {
+            // Skip group header
+            current_index += 1;
+            // Check actions in this group
+            for (action, _) in actions {
+                if current_index == index {
+                    return Some(action.clone());
+                }
+                current_index += 1;
+            }
+        }
+        None
     }
 
     /// Select current theme and apply it.
@@ -1676,6 +1688,7 @@ impl State {
     ///
     /// Get form notes as string.
     ///
+    #[allow(dead_code)] // Used via dispatch system
     pub fn get_form_notes(&self) -> String {
         self.form_notes_textarea
             .lines()
@@ -1748,30 +1761,35 @@ impl State {
 
     /// Get original form name (for change detection).
     ///
+    #[allow(dead_code)] // Used via dispatch system
     pub fn get_original_form_name(&self) -> &str {
         &self.original_form_name
     }
 
     /// Get original form notes (for change detection).
     ///
+    #[allow(dead_code)] // Used via dispatch system
     pub fn get_original_form_notes(&self) -> &str {
         &self.original_form_notes
     }
 
     /// Get original form assignee (for change detection).
     ///
+    #[allow(dead_code)] // Used via dispatch system
     pub fn get_original_form_assignee(&self) -> &Option<String> {
         &self.original_form_assignee
     }
 
     /// Get original form due date (for change detection).
     ///
+    #[allow(dead_code)] // Used via dispatch system
     pub fn get_original_form_due_on(&self) -> &str {
         &self.original_form_due_on
     }
 
     /// Get original form section (for change detection).
     ///
+    #[allow(dead_code)] // Used via dispatch system
     pub fn get_original_form_section(&self) -> &Option<String> {
         &self.original_form_section
     }
@@ -2043,6 +2061,7 @@ impl State {
 
     /// Get all custom field values (for API calls).
     ///
+    #[allow(dead_code)] // Used via dispatch system
     pub fn get_form_custom_field_values(&self) -> &HashMap<String, CustomFieldValue> {
         &self.form_custom_field_values
     }
@@ -2388,6 +2407,7 @@ impl State {
 
     /// Toggle star status of the currently selected project (from Projects list).
     ///
+    #[allow(dead_code)] // Used via hotkey system
     pub fn toggle_star_current_project(&mut self) -> &mut Self {
         let project_info = {
             let filtered = self.get_filtered_projects();
@@ -2423,6 +2443,7 @@ impl State {
 
     /// Unstar the currently selected shortcut (only works for starred projects, not base shortcuts).
     ///
+    #[allow(dead_code)] // Used via hotkey system
     pub fn unstar_current_shortcut(&mut self) -> &mut Self {
         let all_shortcuts = self.get_all_shortcuts();
         let selected_index = self.shortcuts_list_state.selected();

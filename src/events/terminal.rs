@@ -4,7 +4,7 @@
 //! and user interactions. It processes these events and updates the application state accordingly.
 
 use crate::config::{
-    get_action_for_special_mode, hotkeys::get_action_for_event, Hotkey, HotkeyAction, SpecialMode,
+    get_action_for_special_mode, hotkeys::get_action_for_event, HotkeyAction, SpecialMode,
 };
 use crate::state::{Focus, Menu, State};
 use anyhow::Result;
@@ -42,6 +42,150 @@ fn try_execute_hotkey_action(event: &KeyEvent, state: &mut State) -> Result<Opti
             HotkeyAction::Quit => {
                 debug!("Processing exit terminal event (hotkey) '{:?}'...", event);
                 return Ok(Some(false));
+            }
+            HotkeyAction::ToggleTaskComplete => {
+                if state.current_focus() == &Focus::View {
+                    debug!("Processing toggle task completion event '{:?}'...", event);
+                    state.toggle_task_completion();
+                    return Ok(Some(true));
+                }
+            }
+            HotkeyAction::DeleteTask => {
+                if state.current_focus() == &Focus::View {
+                    if matches!(state.current_view(), crate::state::View::TaskDetail) {
+                        // Delete task from detail view
+                        if let Some(task) = state.get_task_detail() {
+                            state.set_delete_confirmation(task.gid.clone());
+                        }
+                    } else if matches!(state.current_view(), crate::state::View::ProjectTasks) {
+                        // Delete task from kanban view
+                        if let Some(task) = state.get_kanban_selected_task() {
+                            state.set_delete_confirmation(task.gid.clone());
+                        }
+                    } else {
+                        debug!("Processing delete task event '{:?}'...", event);
+                        state.delete_selected_task();
+                    }
+                    return Ok(Some(true));
+                }
+            }
+            HotkeyAction::EditTask => {
+                if matches!(state.current_focus(), Focus::View)
+                    && matches!(state.current_view(), crate::state::View::TaskDetail)
+                {
+                    // Edit task from detail view
+                    debug!("Processing edit task event '{:?}'...", event);
+                    if let Some(task) = state.get_task_detail() {
+                        let task_clone = task.clone();
+                        state.init_edit_form(&task_clone);
+
+                        // Load workspace users and sections for dropdowns
+                        if let Some(workspace) = state.get_active_workspace() {
+                            state.dispatch(crate::events::network::Event::GetWorkspaceUsers {
+                                workspace_gid: workspace.gid.clone(),
+                            });
+                        }
+                        if let Some(project) = state.get_project() {
+                            state.dispatch(crate::events::network::Event::GetProjectSections {
+                                project_gid: project.gid.clone(),
+                            });
+                        }
+
+                        state.push_view(crate::state::View::EditTask);
+                        state.focus_view();
+                    }
+                    return Ok(Some(true));
+                }
+            }
+            HotkeyAction::AddComment => {
+                if matches!(state.current_focus(), Focus::View)
+                    && matches!(state.current_view(), crate::state::View::TaskDetail)
+                {
+                    // Add comment from detail view - switch to Comments panel first
+                    debug!("Processing add comment event '{:?}'...", event);
+                    state.set_current_task_panel(crate::state::TaskDetailPanel::Comments);
+                    state.enter_comment_input_mode();
+                    return Ok(Some(true));
+                }
+            }
+            HotkeyAction::SubmitForm => {
+                if matches!(
+                    state.current_view(),
+                    crate::state::View::CreateTask | crate::state::View::EditTask
+                ) {
+                    // Submit form - the actual submission logic is complex and handled
+                    // by checking the hotkey action in the main event loop below.
+                    // This action will be caught and processed there.
+                    return Ok(Some(true));
+                }
+            }
+            HotkeyAction::CreateTask => {
+                if !state.is_debug_mode()
+                    && state.current_focus() == &Focus::View
+                    && matches!(
+                        state.current_view(),
+                        crate::state::View::ProjectTasks | crate::state::View::TaskDetail
+                    )
+                {
+                    // Enter create task view
+                    debug!("Processing create task event '{:?}'...", event);
+                    state.clear_form();
+                    state.set_edit_form_state(Some(crate::state::EditFormState::Name));
+                    // Load workspace users and sections if needed
+                    if let Some(workspace) = state.get_active_workspace() {
+                        state.dispatch(crate::events::network::Event::GetWorkspaceUsers {
+                            workspace_gid: workspace.gid.clone(),
+                        });
+                    }
+                    if let Some(project) = state.get_project() {
+                        state.dispatch(crate::events::network::Event::GetProjectSections {
+                            project_gid: project.gid.clone(),
+                        });
+                        state.dispatch(crate::events::network::Event::GetProjectCustomFields {
+                            project_gid: project.gid.clone(),
+                        });
+                    }
+                    state.push_view(crate::state::View::CreateTask);
+                    state.focus_view();
+                    return Ok(Some(true));
+                }
+            }
+            HotkeyAction::MoveTask => {
+                if !state.is_debug_mode()
+                    && state.current_focus() == &Focus::View
+                    && matches!(state.current_view(), crate::state::View::ProjectTasks)
+                {
+                    // Open section selection modal for moving task
+                    if let Some(task) = state.get_kanban_selected_task() {
+                        debug!("Opening move task modal for task {}...", task.gid);
+                        state.set_move_task_gid(Some(task.gid.clone()));
+                    }
+                    return Ok(Some(true));
+                }
+            }
+            HotkeyAction::OpenThemeSelector => {
+                if !state.is_debug_mode()
+                    && !state.has_theme_selector()
+                    && !state.has_hotkey_editor()
+                    && matches!(state.current_view(), crate::state::View::Welcome)
+                {
+                    // Open theme selector modal (only available on welcome screen)
+                    debug!("Opening theme selector modal...");
+                    state.open_theme_selector();
+                    return Ok(Some(true));
+                }
+            }
+            HotkeyAction::OpenHotkeyEditor => {
+                if !state.is_debug_mode()
+                    && !state.has_theme_selector()
+                    && !state.has_hotkey_editor()
+                    && matches!(state.current_view(), crate::state::View::Welcome)
+                {
+                    // Open hotkey editor modal (only available from Welcome view)
+                    debug!("Opening hotkey editor modal...");
+                    state.open_hotkey_editor();
+                    return Ok(Some(true));
+                }
             }
             HotkeyAction::Cancel | HotkeyAction::Back => {
                 // Esc/back handling - check special states first
@@ -639,7 +783,7 @@ impl Handler {
                         }
                     }
                 }
-                // Handle hotkey editor key capture FIRST
+                // Handle hotkey editor key capture FIRST - blocks all other hotkeys
                 if state.has_hotkey_editor() {
                     if let Some(action) = state.get_hotkey_editor_selected_action() {
                         // Capturing a key for rebinding
@@ -654,33 +798,14 @@ impl Handler {
                                 return Ok(true);
                             }
                             _ => {
-                                // Bind the key to the action
+                                // Bind the key to the action using the new grouped update function
+                                use crate::config::hotkeys::{update_hotkey_for_action, Hotkey};
                                 let hotkey = Hotkey {
                                     code: event.code,
                                     modifiers: event.modifiers,
                                 };
-                                let view = state
-                                    .get_hotkey_editor_view()
-                                    .cloned()
-                                    .unwrap_or_else(|| state.current_view().clone());
                                 let mut hotkeys = state.get_hotkeys().clone();
-                                match view {
-                                    crate::state::View::Welcome => {
-                                        hotkeys.welcome.insert(action.clone(), hotkey);
-                                    }
-                                    crate::state::View::ProjectTasks => {
-                                        hotkeys.project_tasks.insert(action.clone(), hotkey);
-                                    }
-                                    crate::state::View::TaskDetail => {
-                                        hotkeys.task_detail.insert(action.clone(), hotkey);
-                                    }
-                                    crate::state::View::CreateTask => {
-                                        hotkeys.create_task.insert(action.clone(), hotkey);
-                                    }
-                                    crate::state::View::EditTask => {
-                                        hotkeys.edit_task.insert(action.clone(), hotkey);
-                                    }
-                                }
+                                update_hotkey_for_action(&mut hotkeys, action, hotkey);
                                 state.set_hotkeys(hotkeys);
                                 state.set_hotkey_editor_selected_action(None);
                                 // Trigger config save - config will be saved on next save cycle
@@ -688,62 +813,47 @@ impl Handler {
                             }
                         }
                     } else {
-                        // Navigating in hotkey editor
-                        let action = get_action_for_event(
-                            &event,
-                            state
-                                .get_hotkey_editor_view()
-                                .unwrap_or(state.current_view()),
-                            state.get_hotkeys(),
-                        );
-                        match action {
-                            Some(HotkeyAction::NavigateMenuNext)
-                            | Some(HotkeyAction::NavigateTaskNext)
-                            | Some(HotkeyAction::NavigateFieldNext) => {
+                        // Navigating in hotkey editor - only allow j/k and Enter/Esc
+                        match event {
+                            KeyEvent {
+                                code: KeyCode::Char('j'),
+                                modifiers: KeyModifiers::NONE,
+                                ..
+                            } => {
                                 state.next_hotkey_action();
                                 return Ok(true);
                             }
-                            Some(HotkeyAction::NavigateMenuPrev)
-                            | Some(HotkeyAction::NavigateTaskPrev)
-                            | Some(HotkeyAction::NavigateFieldPrev) => {
+                            KeyEvent {
+                                code: KeyCode::Char('k'),
+                                modifiers: KeyModifiers::NONE,
+                                ..
+                            } => {
                                 state.previous_hotkey_action();
                                 return Ok(true);
                             }
-                            Some(HotkeyAction::Select) => {
+                            KeyEvent {
+                                code: KeyCode::Enter,
+                                modifiers: KeyModifiers::NONE,
+                                ..
+                            } => {
                                 // Start editing the selected action
-                                let view = state
-                                    .get_hotkey_editor_view()
-                                    .cloned()
-                                    .unwrap_or_else(|| state.current_view().clone());
-                                let actions: Vec<HotkeyAction> = match view {
-                                    crate::state::View::Welcome => {
-                                        state.get_hotkeys().welcome.keys().cloned().collect()
-                                    }
-                                    crate::state::View::ProjectTasks => {
-                                        state.get_hotkeys().project_tasks.keys().cloned().collect()
-                                    }
-                                    crate::state::View::TaskDetail => {
-                                        state.get_hotkeys().task_detail.keys().cloned().collect()
-                                    }
-                                    crate::state::View::CreateTask => {
-                                        state.get_hotkeys().create_task.keys().cloned().collect()
-                                    }
-                                    crate::state::View::EditTask => {
-                                        state.get_hotkeys().edit_task.keys().cloned().collect()
-                                    }
-                                };
                                 let index = state.get_hotkey_editor_dropdown_index();
-                                if let Some(action) = actions.get(index) {
-                                    state.set_hotkey_editor_selected_action(Some(action.clone()));
+                                if let Some(action) = state.get_hotkey_action_at_index(index) {
+                                    state.set_hotkey_editor_selected_action(Some(action));
                                 }
                                 return Ok(true);
                             }
-                            Some(HotkeyAction::Cancel) => {
+                            KeyEvent {
+                                code: KeyCode::Esc,
+                                modifiers: KeyModifiers::NONE,
+                                ..
+                            } => {
+                                // Close hotkey editor
                                 state.close_hotkey_editor();
                                 return Ok(true);
                             }
                             _ => {
-                                // Other keys don't do anything in hotkey editor
+                                // Block all other keys when in hotkey editor
                                 return Ok(true);
                             }
                         }
@@ -774,104 +884,7 @@ impl Handler {
                     } if state.is_comment_input_mode() => {
                         state.add_comment_char(c);
                     }
-                    // Handle form navigation mode - j/k to navigate, Enter to edit
-                    KeyEvent {
-                        code: KeyCode::Char('j'),
-                        modifiers: KeyModifiers::NONE,
-                        ..
-                    } if matches!(
-                        state.current_view(),
-                        crate::state::View::CreateTask | crate::state::View::EditTask
-                    ) && !state.is_field_editing_mode() =>
-                    {
-                        // Navigate to next field
-                        let enabled_custom_fields = state.get_enabled_custom_fields();
-                        let next_state = match state.get_edit_form_state() {
-                            Some(crate::state::EditFormState::Name) => {
-                                crate::state::EditFormState::Notes
-                            }
-                            Some(crate::state::EditFormState::Notes) => {
-                                crate::state::EditFormState::Assignee
-                            }
-                            Some(crate::state::EditFormState::Assignee) => {
-                                crate::state::EditFormState::DueDate
-                            }
-                            Some(crate::state::EditFormState::DueDate) => {
-                                crate::state::EditFormState::Section
-                            }
-                            Some(crate::state::EditFormState::Section) => {
-                                if !enabled_custom_fields.is_empty() {
-                                    crate::state::EditFormState::CustomField(0)
-                                } else {
-                                    crate::state::EditFormState::Name
-                                }
-                            }
-                            Some(crate::state::EditFormState::CustomField(idx)) => {
-                                if idx + 1 < enabled_custom_fields.len() {
-                                    crate::state::EditFormState::CustomField(idx + 1)
-                                } else {
-                                    crate::state::EditFormState::Name
-                                }
-                            }
-                            None => crate::state::EditFormState::Name,
-                        };
-                        state.set_edit_form_state(Some(next_state));
-                        // Initialize dropdown indices when entering assignee or section fields
-                        if matches!(next_state, crate::state::EditFormState::Assignee) {
-                            state.init_assignee_dropdown_index();
-                        } else if matches!(next_state, crate::state::EditFormState::Section) {
-                            state.init_section_dropdown_index();
-                        }
-                    }
-                    KeyEvent {
-                        code: KeyCode::Char('k'),
-                        modifiers: KeyModifiers::NONE,
-                        ..
-                    } if matches!(
-                        state.current_view(),
-                        crate::state::View::CreateTask | crate::state::View::EditTask
-                    ) && !state.is_field_editing_mode() =>
-                    {
-                        // Navigate to previous field
-                        let enabled_custom_fields = state.get_enabled_custom_fields();
-                        let prev_state = match state.get_edit_form_state() {
-                            Some(crate::state::EditFormState::Name) => {
-                                if !enabled_custom_fields.is_empty() {
-                                    crate::state::EditFormState::CustomField(
-                                        enabled_custom_fields.len() - 1,
-                                    )
-                                } else {
-                                    crate::state::EditFormState::Section
-                                }
-                            }
-                            Some(crate::state::EditFormState::Notes) => {
-                                crate::state::EditFormState::Name
-                            }
-                            Some(crate::state::EditFormState::Assignee) => {
-                                crate::state::EditFormState::Notes
-                            }
-                            Some(crate::state::EditFormState::DueDate) => {
-                                crate::state::EditFormState::Assignee
-                            }
-                            Some(crate::state::EditFormState::Section) => {
-                                crate::state::EditFormState::DueDate
-                            }
-                            Some(crate::state::EditFormState::CustomField(0)) => {
-                                crate::state::EditFormState::Section
-                            }
-                            Some(crate::state::EditFormState::CustomField(idx)) => {
-                                crate::state::EditFormState::CustomField(idx - 1)
-                            }
-                            None => crate::state::EditFormState::Name,
-                        };
-                        state.set_edit_form_state(Some(prev_state));
-                        // Initialize dropdown indices when entering assignee or section fields
-                        if matches!(prev_state, crate::state::EditFormState::Assignee) {
-                            state.init_assignee_dropdown_index();
-                        } else if matches!(prev_state, crate::state::EditFormState::Section) {
-                            state.init_section_dropdown_index();
-                        }
-                    }
+                    // Form field navigation is now handled by NavigateFieldNext/NavigateFieldPrev hotkeys
                     KeyEvent {
                         code: KeyCode::Enter,
                         modifiers: KeyModifiers::NONE,
@@ -1466,7 +1479,56 @@ impl Handler {
                                                 | crate::state::View::EditTask
                                         ) {
                                             if !state.is_field_editing_mode() {
-                                                state.scroll_form_up();
+                                                // Navigate to previous form field
+                                                let enabled_custom_fields =
+                                                    state.get_enabled_custom_fields();
+                                                let prev_state = match state.get_edit_form_state() {
+                                                    Some(crate::state::EditFormState::Name) => {
+                                                        if !enabled_custom_fields.is_empty() {
+                                                            crate::state::EditFormState::CustomField(
+                                                                enabled_custom_fields.len() - 1,
+                                                            )
+                                                        } else {
+                                                            crate::state::EditFormState::Section
+                                                        }
+                                                    }
+                                                    Some(crate::state::EditFormState::Notes) => {
+                                                        crate::state::EditFormState::Name
+                                                    }
+                                                    Some(crate::state::EditFormState::Assignee) => {
+                                                        crate::state::EditFormState::Notes
+                                                    }
+                                                    Some(crate::state::EditFormState::DueDate) => {
+                                                        crate::state::EditFormState::Assignee
+                                                    }
+                                                    Some(crate::state::EditFormState::Section) => {
+                                                        crate::state::EditFormState::DueDate
+                                                    }
+                                                    Some(
+                                                        crate::state::EditFormState::CustomField(0),
+                                                    ) => crate::state::EditFormState::Section,
+                                                    Some(
+                                                        crate::state::EditFormState::CustomField(
+                                                            idx,
+                                                        ),
+                                                    ) => crate::state::EditFormState::CustomField(
+                                                        idx - 1,
+                                                    ),
+                                                    None => crate::state::EditFormState::Name,
+                                                };
+                                                state.set_edit_form_state(Some(prev_state));
+                                                // Initialize dropdown indices when entering assignee or section fields
+                                                if matches!(
+                                                    prev_state,
+                                                    crate::state::EditFormState::Assignee
+                                                ) {
+                                                    state.init_assignee_dropdown_index();
+                                                } else if matches!(
+                                                    prev_state,
+                                                    crate::state::EditFormState::Section
+                                                ) {
+                                                    state.init_section_dropdown_index();
+                                                }
                                             } else {
                                                 match state.get_edit_form_state() {
                                                     Some(crate::state::EditFormState::Assignee) => {
@@ -1754,23 +1816,79 @@ impl Handler {
                                             crate::state::View::CreateTask
                                                 | crate::state::View::EditTask
                                         ) {
-                                            // Handle dropdown navigation in forms
-                                            match state.get_edit_form_state() {
-                                                Some(crate::state::EditFormState::Assignee) => {
-                                                    debug!(
-                                                        "Processing next assignee event '{:?}'...",
-                                                        event
-                                                    );
-                                                    state.next_assignee();
+                                            if !state.is_field_editing_mode() {
+                                                // Navigate to next form field
+                                                let enabled_custom_fields =
+                                                    state.get_enabled_custom_fields();
+                                                let next_state = match state.get_edit_form_state() {
+                                                    Some(crate::state::EditFormState::Name) => {
+                                                        crate::state::EditFormState::Notes
+                                                    }
+                                                    Some(crate::state::EditFormState::Notes) => {
+                                                        crate::state::EditFormState::Assignee
+                                                    }
+                                                    Some(crate::state::EditFormState::Assignee) => {
+                                                        crate::state::EditFormState::DueDate
+                                                    }
+                                                    Some(crate::state::EditFormState::DueDate) => {
+                                                        crate::state::EditFormState::Section
+                                                    }
+                                                    Some(crate::state::EditFormState::Section) => {
+                                                        if !enabled_custom_fields.is_empty() {
+                                                            crate::state::EditFormState::CustomField(
+                                                                0,
+                                                            )
+                                                        } else {
+                                                            crate::state::EditFormState::Name
+                                                        }
+                                                    }
+                                                    Some(
+                                                        crate::state::EditFormState::CustomField(
+                                                            idx,
+                                                        ),
+                                                    ) => {
+                                                        if idx + 1 < enabled_custom_fields.len() {
+                                                            crate::state::EditFormState::CustomField(
+                                                                idx + 1,
+                                                            )
+                                                        } else {
+                                                            crate::state::EditFormState::Name
+                                                        }
+                                                    }
+                                                    None => crate::state::EditFormState::Name,
+                                                };
+                                                state.set_edit_form_state(Some(next_state));
+                                                // Initialize dropdown indices when entering assignee or section fields
+                                                if matches!(
+                                                    next_state,
+                                                    crate::state::EditFormState::Assignee
+                                                ) {
+                                                    state.init_assignee_dropdown_index();
+                                                } else if matches!(
+                                                    next_state,
+                                                    crate::state::EditFormState::Section
+                                                ) {
+                                                    state.init_section_dropdown_index();
                                                 }
-                                                Some(crate::state::EditFormState::Section) => {
-                                                    debug!(
-                                                        "Processing next section event '{:?}'...",
-                                                        event
-                                                    );
-                                                    state.next_section();
+                                            } else {
+                                                // Handle dropdown navigation in forms
+                                                match state.get_edit_form_state() {
+                                                    Some(crate::state::EditFormState::Assignee) => {
+                                                        debug!(
+                                                            "Processing next assignee event '{:?}'...",
+                                                            event
+                                                        );
+                                                        state.next_assignee();
+                                                    }
+                                                    Some(crate::state::EditFormState::Section) => {
+                                                        debug!(
+                                                            "Processing next section event '{:?}'...",
+                                                            event
+                                                        );
+                                                        state.next_section();
+                                                    }
+                                                    _ => {}
                                                 }
-                                                _ => {}
                                             }
                                         } else {
                                             match state.current_focus() {
@@ -2139,13 +2257,15 @@ impl Handler {
                         modifiers: KeyModifiers::NONE,
                         ..
                     } => {
-                        if !state.is_search_mode() {
-                            if state.current_focus() == &Focus::View {
-                                debug!("Processing toggle task completion event '{:?}'...", event);
-                                state.toggle_task_completion();
-                            }
-                        } else {
+                        if state.is_search_mode() {
                             state.add_search_char('x');
+                        } else {
+                            // Try hotkey first
+                            if let Ok(Some(should_continue)) =
+                                try_execute_hotkey_action(&event, state)
+                            {
+                                return Ok(should_continue);
+                            }
                         }
                     }
                     KeyEvent {
@@ -2162,38 +2282,16 @@ impl Handler {
                             debug!("Processing exit debug mode (d) event '{:?}'...", event);
                             state.exit_debug_mode();
                         } else {
-                            // Check if we should enter debug mode or delete task
-                            match state.current_focus() {
-                                Focus::View => {
-                                    if matches!(
-                                        state.current_view(),
-                                        crate::state::View::TaskDetail
-                                    ) {
-                                        // Delete task from detail view
-                                        if let Some(task) = state.get_task_detail() {
-                                            state.set_delete_confirmation(task.gid.clone());
-                                        }
-                                    } else if matches!(
-                                        state.current_view(),
-                                        crate::state::View::ProjectTasks
-                                    ) {
-                                        // Delete task from kanban view
-                                        if let Some(task) = state.get_kanban_selected_task() {
-                                            state.set_delete_confirmation(task.gid.clone());
-                                        }
-                                    } else {
-                                        debug!("Processing delete task event '{:?}'...", event);
-                                        state.delete_selected_task();
-                                    }
-                                }
-                                _ => {
-                                    // Enter debug mode when not in View focus
-                                    debug!(
-                                        "Processing enter debug mode (d) event '{:?}'...",
-                                        event
-                                    );
-                                    state.enter_debug_mode();
-                                }
+                            // Try hotkey first (DeleteTask or EnterDebug)
+                            if let Ok(Some(should_continue)) =
+                                try_execute_hotkey_action(&event, state)
+                            {
+                                return Ok(should_continue);
+                            }
+                            // Fallback: Enter debug mode when not in View focus
+                            if state.current_focus() != &Focus::View {
+                                debug!("Processing enter debug mode (d) event '{:?}'...", event);
+                                state.enter_debug_mode();
                             }
                         }
                     }
@@ -2206,34 +2304,12 @@ impl Handler {
                             state.add_search_char('e');
                         } else if state.is_comment_input_mode() {
                             state.add_comment_char('e');
-                        } else if matches!(state.current_focus(), Focus::View)
-                            && matches!(state.current_view(), crate::state::View::TaskDetail)
-                        {
-                            // Edit task from detail view
-                            debug!("Processing edit task event '{:?}'...", event);
-                            // Initialize form with task data (including custom fields)
-                            if let Some(task) = state.get_task_detail() {
-                                let task_clone = task.clone();
-                                state.init_edit_form(&task_clone);
-
-                                // Load workspace users and sections for dropdowns
-                                if let Some(workspace) = state.get_active_workspace() {
-                                    state.dispatch(
-                                        crate::events::network::Event::GetWorkspaceUsers {
-                                            workspace_gid: workspace.gid.clone(),
-                                        },
-                                    );
-                                }
-                                if let Some(project) = state.get_project() {
-                                    state.dispatch(
-                                        crate::events::network::Event::GetProjectSections {
-                                            project_gid: project.gid.clone(),
-                                        },
-                                    );
-                                }
-
-                                state.push_view(crate::state::View::EditTask);
-                                state.focus_view();
+                        } else {
+                            // Try hotkey first (EditTask)
+                            if let Ok(Some(should_continue)) =
+                                try_execute_hotkey_action(&event, state)
+                            {
+                                return Ok(should_continue);
                             }
                         }
                     }
@@ -2246,13 +2322,13 @@ impl Handler {
                             state.add_search_char('c');
                         } else if state.is_comment_input_mode() {
                             state.add_comment_char('c');
-                        } else if matches!(state.current_focus(), Focus::View)
-                            && matches!(state.current_view(), crate::state::View::TaskDetail)
-                        {
-                            // Add comment from detail view - switch to Comments panel first
-                            debug!("Processing add comment event '{:?}'...", event);
-                            state.set_current_task_panel(crate::state::TaskDetailPanel::Comments);
-                            state.enter_comment_input_mode();
+                        } else {
+                            // Try hotkey first (AddComment or CreateTask)
+                            if let Ok(Some(should_continue)) =
+                                try_execute_hotkey_action(&event, state)
+                            {
+                                return Ok(should_continue);
+                            }
                         }
                     }
                     KeyEvent {
@@ -2263,215 +2339,12 @@ impl Handler {
                         if state.is_search_mode() {
                             debug!("Processing search character 's' event '{:?}'...", event);
                             state.add_search_char('s');
-                        } else if matches!(
-                            state.current_view(),
-                            crate::state::View::CreateTask | crate::state::View::EditTask
-                        ) {
-                            // Submit form
-                            // Make sure section is selected if we're in the section field - do this first
-                            let is_section_field = matches!(
-                                state.get_edit_form_state(),
-                                Some(crate::state::EditFormState::Section)
-                            );
-                            if is_section_field {
-                                state.select_current_section();
-                            }
-                            // Now get all the values we need
-                            if matches!(state.current_view(), crate::state::View::CreateTask) {
-                                // Create task
-                                let project_gid_opt = state.get_project().map(|p| p.gid.clone());
-                                let name = state.get_form_name().to_string();
-                                if !name.trim().is_empty() {
-                                    if let Some(project_gid) = project_gid_opt {
-                                        let notes = state.get_form_notes().to_string();
-                                        let assignee = state.get_form_assignee().cloned();
-                                        let due_on = if state.get_form_due_on().is_empty() {
-                                            None
-                                        } else {
-                                            Some(state.get_form_due_on().to_string())
-                                        };
-                                        let section = state.get_form_section().cloned();
-                                        state.dispatch(crate::events::network::Event::CreateTask {
-                                            project_gid,
-                                            name,
-                                            notes: Some(notes),
-                                            assignee,
-                                            due_on,
-                                            section,
-                                            custom_fields: state
-                                                .get_form_custom_field_values()
-                                                .clone(),
-                                        });
-                                        state.clear_form();
-                                        state.pop_view();
-                                    }
-                                }
-                            } else if matches!(state.current_view(), crate::state::View::EditTask) {
-                                // Update task - only send fields that have changed
-                                debug!("Processing save task event (EditTask)...");
-                                if let Some(task) = state.get_task_detail() {
-                                    let task_gid = task.gid.clone();
-                                    info!("Saving task {}...", task_gid);
-
-                                    // Compare current values with original values - clone all values first
-                                    let original_name = state.get_original_form_name().to_string();
-                                    let original_notes =
-                                        state.get_original_form_notes().to_string();
-                                    let original_assignee =
-                                        state.get_original_form_assignee().clone();
-                                    let original_due_on =
-                                        state.get_original_form_due_on().to_string();
-                                    let original_section =
-                                        state.get_original_form_section().clone();
-
-                                    let current_name = state.get_form_name().to_string();
-                                    let current_notes = state.get_form_notes().to_string();
-                                    let current_assignee = state.get_form_assignee().cloned();
-                                    let current_due_on = state.get_form_due_on().to_string();
-                                    let current_section = state.get_form_section().cloned();
-                                    let current_custom_fields =
-                                        state.get_form_custom_field_values().clone();
-
-                                    // Build a map of original custom field values from the task
-                                    let mut original_cf_map = std::collections::HashMap::new();
-                                    for cf in &task.custom_fields {
-                                        let value = match cf.resource_subtype.as_str() {
-                                            "text" => crate::state::CustomFieldValue::Text(
-                                                cf.text_value.clone().unwrap_or_default(),
-                                            ),
-                                            "number" => crate::state::CustomFieldValue::Number(
-                                                cf.number_value,
-                                            ),
-                                            "date" => crate::state::CustomFieldValue::Date(
-                                                cf.date_value.clone(),
-                                            ),
-                                            "enum" => crate::state::CustomFieldValue::Enum(
-                                                cf.enum_value.as_ref().map(|e| e.gid.clone()),
-                                            ),
-                                            "multi_enum" => {
-                                                crate::state::CustomFieldValue::MultiEnum(
-                                                    cf.multi_enum_values
-                                                        .iter()
-                                                        .map(|e| e.gid.clone())
-                                                        .collect(),
-                                                )
-                                            }
-                                            "people" => crate::state::CustomFieldValue::People(
-                                                cf.people_value
-                                                    .iter()
-                                                    .map(|u| u.gid.clone())
-                                                    .collect(),
-                                            ),
-                                            _ => continue,
-                                        };
-                                        original_cf_map.insert(cf.gid.clone(), value);
-                                    }
-
-                                    // Build update fields, only including changed non-empty values
-                                    let mut name_val = None;
-                                    if current_name != original_name
-                                        && !current_name.trim().is_empty()
-                                    {
-                                        name_val = Some(current_name);
-                                    }
-
-                                    let mut notes_val = None;
-                                    if current_notes != original_notes
-                                        && !current_notes.trim().is_empty()
-                                    {
-                                        notes_val = Some(current_notes);
-                                    }
-
-                                    let mut assignee_val = None;
-                                    {
-                                        let current = current_assignee.as_ref();
-                                        let original = original_assignee.as_ref();
-                                        match (current, original) {
-                                            (Some(a), Some(b)) if a.as_str() == b.as_str() => {}
-                                            (None, None) => {}
-                                            (Some(gid), _) if !gid.trim().is_empty() => {
-                                                assignee_val = Some(gid.clone());
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-
-                                    let mut due_on_val = None;
-                                    if current_due_on != original_due_on
-                                        && !current_due_on.trim().is_empty()
-                                    {
-                                        due_on_val = Some(current_due_on);
-                                    }
-
-                                    let mut section_val = None;
-                                    {
-                                        let current = current_section.as_ref();
-                                        let original = original_section.as_ref();
-                                        match (current, original) {
-                                            (Some(a), Some(b)) if a.as_str() == b.as_str() => {}
-                                            (None, None) => {}
-                                            (Some(gid), _) if !gid.trim().is_empty() => {
-                                                section_val = Some(gid.clone());
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-
-                                    // Check if custom fields have changed
-                                    let has_custom_field_changes =
-                                        current_custom_fields != original_cf_map;
-
-                                    // Check if any field has changed
-                                    let has_other_changes = name_val.is_some()
-                                        || notes_val.is_some()
-                                        || assignee_val.is_some()
-                                        || due_on_val.is_some();
-
-                                    let has_changes = has_other_changes
-                                        || section_val.is_some()
-                                        || has_custom_field_changes;
-
-                                    // Only dispatch if there are actual changes
-                                    // If only section changed, UpdateTaskFields will handle it via add_task_to_section
-                                    // without sending a PUT request (handled in asana/mod.rs)
-                                    if has_changes {
-                                        info!("Dispatching UpdateTaskFields with changes");
-                                        state.dispatch(
-                                            crate::events::network::Event::UpdateTaskFields {
-                                                gid: task_gid,
-                                                name: name_val,
-                                                notes: notes_val,
-                                                assignee: assignee_val,
-                                                due_on: due_on_val,
-                                                section: section_val,
-                                                completed: None,
-                                                custom_fields: current_custom_fields,
-                                            },
-                                        );
-                                        state.clear_form();
-                                        state.pop_view();
-                                    } else {
-                                        info!(
-                                            "No changes detected, closing edit mode without saving"
-                                        );
-                                        state.clear_form();
-                                        state.pop_view();
-                                    }
-                                } else {
-                                    warn!("Cannot save task: no task detail available");
-                                }
-                            }
-                        } else if state.current_focus() == &Focus::Menu {
-                            debug!("Processing star/unstar event '{:?}'...", event);
-                            match state.current_menu() {
-                                Menu::TopList => {
-                                    state.toggle_star_current_project();
-                                }
-                                Menu::Shortcuts => {
-                                    // Unstar from shortcuts list (only works for starred projects)
-                                    state.unstar_current_shortcut();
-                                }
-                                _ => {}
+                        } else {
+                            // Try hotkey first (SubmitForm or ToggleStar)
+                            if let Ok(Some(should_continue)) =
+                                try_execute_hotkey_action(&event, state)
+                            {
+                                return Ok(should_continue);
                             }
                         }
                     }
@@ -2589,14 +2462,12 @@ impl Handler {
                     } => {
                         if state.is_search_mode() {
                             state.add_search_char('m');
-                        } else if !state.is_debug_mode()
-                            && state.current_focus() == &Focus::View
-                            && matches!(state.current_view(), crate::state::View::ProjectTasks)
-                        {
-                            // Open section selection modal for moving task
-                            if let Some(task) = state.get_kanban_selected_task() {
-                                debug!("Opening move task modal for task {}...", task.gid);
-                                state.set_move_task_gid(Some(task.gid.clone()));
+                        } else {
+                            // Try hotkey first (MoveTask)
+                            if let Ok(Some(should_continue)) =
+                                try_execute_hotkey_action(&event, state)
+                            {
+                                return Ok(should_continue);
                             }
                         }
                     }
@@ -2607,14 +2478,13 @@ impl Handler {
                     } => {
                         if state.is_search_mode() {
                             state.add_search_char('t');
-                        } else if !state.is_debug_mode()
-                            && !state.has_theme_selector()
-                            && !state.has_hotkey_editor()
-                            && matches!(state.current_view(), crate::state::View::Welcome)
-                        {
-                            // Open theme selector modal (only available on welcome screen)
-                            debug!("Opening theme selector modal...");
-                            state.open_theme_selector();
+                        } else {
+                            // Try hotkey first (OpenThemeSelector)
+                            if let Ok(Some(should_continue)) =
+                                try_execute_hotkey_action(&event, state)
+                            {
+                                return Ok(should_continue);
+                            }
                         }
                     }
                     KeyEvent {
@@ -2624,13 +2494,13 @@ impl Handler {
                     } => {
                         if state.is_search_mode() {
                             state.add_search_char('?');
-                        } else if !state.is_debug_mode()
-                            && !state.has_theme_selector()
-                            && !state.has_hotkey_editor()
-                        {
-                            // Open hotkey editor modal (available from any view)
-                            debug!("Opening hotkey editor modal...");
-                            state.open_hotkey_editor();
+                        } else {
+                            // Try hotkey first (OpenHotkeyEditor)
+                            if let Ok(Some(should_continue)) =
+                                try_execute_hotkey_action(&event, state)
+                            {
+                                return Ok(should_continue);
+                            }
                         }
                     }
                     KeyEvent {
@@ -2640,36 +2510,13 @@ impl Handler {
                     } => {
                         if state.is_search_mode() {
                             state.add_search_char('n');
-                        } else if !state.is_debug_mode()
-                            && state.current_focus() == &Focus::View
-                            && matches!(
-                                state.current_view(),
-                                crate::state::View::ProjectTasks | crate::state::View::TaskDetail
-                            )
-                        {
-                            // Enter create task view
-                            debug!("Processing create task event '{:?}'...", event);
-                            // Initialize form state
-                            state.clear_form();
-                            state.set_edit_form_state(Some(crate::state::EditFormState::Name));
-                            // Load workspace users and sections if needed
-                            if let Some(workspace) = state.get_active_workspace() {
-                                state.dispatch(crate::events::network::Event::GetWorkspaceUsers {
-                                    workspace_gid: workspace.gid.clone(),
-                                });
+                        } else {
+                            // Try hotkey first (CreateTask)
+                            if let Ok(Some(should_continue)) =
+                                try_execute_hotkey_action(&event, state)
+                            {
+                                return Ok(should_continue);
                             }
-                            if let Some(project) = state.get_project() {
-                                state.dispatch(crate::events::network::Event::GetProjectSections {
-                                    project_gid: project.gid.clone(),
-                                });
-                                state.dispatch(
-                                    crate::events::network::Event::GetProjectCustomFields {
-                                        project_gid: project.gid.clone(),
-                                    },
-                                );
-                            }
-                            state.push_view(crate::state::View::CreateTask);
-                            state.focus_view();
                         }
                     }
                     KeyEvent {

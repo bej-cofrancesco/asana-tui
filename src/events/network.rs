@@ -47,6 +47,7 @@ pub enum Event {
     GetWorkspaceUsers {
         workspace_gid: String,
     },
+    #[allow(dead_code)] // Used via dispatch system
     CreateTask {
         project_gid: String,
         name: String,
@@ -56,6 +57,7 @@ pub enum Event {
         section: Option<String>,
         custom_fields: HashMap<String, crate::state::CustomFieldValue>,
     },
+    #[allow(dead_code)] // Used via dispatch system
     UpdateTaskFields {
         gid: String,
         name: Option<String>,
