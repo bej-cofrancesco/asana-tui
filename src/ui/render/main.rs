@@ -34,6 +34,11 @@ pub fn main(frame: &mut Frame, size: Rect, state: &mut State) {
                     .unwrap_or_else(|| "this task".to_string());
                 render_delete_confirmation(frame, size, &task_name, state);
             }
+
+            // Check if we need to show assignee filter modal (render on top)
+            if state.has_assignee_filter() {
+                render_assignee_filter_modal(frame, size, state);
+            }
         }
         View::TaskDetail => {
             task_detail::task_detail(frame, size, state);
@@ -342,6 +347,120 @@ fn render_theme_selector_modal(frame: &mut Frame, size: Rect, state: &State) {
         .border_style(styling::active_block_border_style(theme));
 
     let list = List::new(items)
+        .block(list_block)
+        .style(styling::normal_text_style(theme))
+        .highlight_style(
+            Style::default()
+                .fg(theme.highlight_fg.to_color())
+                .bg(theme.highlight_bg.to_color())
+                .add_modifier(Modifier::BOLD),
+        );
+
+    frame.render_stateful_widget(list, chunks[1], &mut list_state);
+}
+
+fn render_assignee_filter_modal(frame: &mut Frame, size: Rect, state: &State) {
+    use crate::ui::widgets::styling;
+    use ratatui::{
+        layout::{Constraint, Direction, Layout},
+        style::{Modifier, Style},
+        widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
+    };
+
+    // Create a centered popup dialog using ratatui pattern
+    let popup_area = centered_rect(50, 50, size);
+
+    // Clear the area first (ratatui modal pattern)
+    frame.render_widget(Clear, popup_area);
+
+    // Split popup into search and dropdown areas
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(7)])
+        .split(popup_area);
+
+    // Search input area
+    let theme = state.get_theme();
+    let search_text = state.get_assignee_filter_search();
+    let search_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Search Assignee")
+        .border_style(styling::active_block_border_style(theme));
+    let search_para = Paragraph::new(format!("> {}", search_text))
+        .block(search_block)
+        .style(styling::normal_text_style(theme));
+    frame.render_widget(search_para, chunks[0]);
+
+    // Get filtered users and selected index
+    let search_text = state.get_assignee_filter_search();
+    let users = state.get_workspace_users();
+    let filtered: Vec<_> = users
+        .iter()
+        .filter(|user| {
+            search_text.is_empty()
+                || user
+                    .name
+                    .to_lowercase()
+                    .contains(&search_text.to_lowercase())
+                || user
+                    .email
+                    .to_lowercase()
+                    .contains(&search_text.to_lowercase())
+        })
+        .collect();
+    let selected_index = state.get_assignee_filter_dropdown_index();
+
+    // Create list items: "All" at index 0, "Unassigned" at index 1, then users
+    let mut items: Vec<ListItem> = vec![
+        ListItem::new("All (clear filter)"),
+        ListItem::new("Unassigned"),
+    ];
+    items.extend(
+        filtered
+            .iter()
+            .map(|user| {
+                let display_text = if !user.email.is_empty() {
+                    format!("{} ({})", user.name, user.email)
+                } else {
+                    user.name.clone()
+                };
+                ListItem::new(display_text)
+            })
+            .collect::<Vec<_>>(),
+    );
+
+    // Calculate visible range (show max 8 items, centered around selected)
+    let max_visible = 8;
+    let total_items = items.len();
+    let start_index = if total_items <= max_visible {
+        0
+    } else {
+        (selected_index as i32 - max_visible as i32 / 2)
+            .max(0)
+            .min((total_items - max_visible) as i32) as usize
+    };
+    let end_index = (start_index + max_visible).min(total_items);
+    let visible_items = &items[start_index..end_index];
+    let visible_selected = selected_index.saturating_sub(start_index);
+
+    // Use ListState for proper selection display
+    let mut list_state = ratatui::widgets::ListState::default();
+    if !visible_items.is_empty() {
+        let safe_index = visible_selected.min(visible_items.len().saturating_sub(1));
+        list_state.select(Some(safe_index));
+    }
+
+    // Create list block
+    let list_block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(
+            "Assignees ({} found, {} total)",
+            filtered.len(),
+            users.len()
+        ))
+        .border_style(styling::active_block_border_style(theme));
+
+    let list = List::new(visible_items.iter().cloned())
         .block(list_block)
         .style(styling::normal_text_style(theme))
         .highlight_style(

@@ -33,6 +33,7 @@ fn try_execute_hotkey_action(event: &KeyEvent, state: &mut State) -> Result<Opti
         || state.has_delete_confirmation()
         || state.has_theme_selector()
         || state.has_move_task()
+        || state.has_assignee_filter()
     {
         return Ok(None);
     }
@@ -160,6 +161,24 @@ fn try_execute_hotkey_action(event: &KeyEvent, state: &mut State) -> Result<Opti
                         debug!("Opening move task modal for task {}...", task.gid);
                         state.set_move_task_gid(Some(task.gid.clone()));
                     }
+                    return Ok(Some(true));
+                }
+            }
+            HotkeyAction::FilterByAssignee => {
+                if !state.is_debug_mode()
+                    && state.current_focus() == &Focus::View
+                    && matches!(state.current_view(), crate::state::View::ProjectTasks)
+                    && !state.has_assignee_filter()
+                {
+                    // Open assignee filter modal
+                    debug!("Opening assignee filter modal...");
+                    // Ensure workspace users are loaded
+                    if let Some(workspace) = state.get_active_workspace() {
+                        state.dispatch(crate::events::network::Event::GetWorkspaceUsers {
+                            workspace_gid: workspace.gid.clone(),
+                        });
+                    }
+                    state.open_assignee_filter();
                     return Ok(Some(true));
                 }
             }
@@ -370,29 +389,18 @@ impl Handler {
                                 }
                                 Some(crate::state::EditFormState::Assignee) => {
                                     // Handle assignee dropdown navigation and search
-                                    // Check for configured hotkeys first
-                                    if let Some(action) = get_action_for_event(
-                                        &event,
-                                        state.current_view(),
-                                        state.get_hotkeys(),
-                                    ) {
-                                        match action {
-                                            HotkeyAction::NavigateNext => {
-                                                state.next_assignee();
-                                                return Ok(true);
-                                            }
-                                            HotkeyAction::NavigatePrev => {
-                                                state.previous_assignee();
-                                                return Ok(true);
-                                            }
-                                            HotkeyAction::Select => {
-                                                state.select_current_assignee();
-                                                state.exit_field_editing_mode();
-                                                return Ok(true);
-                                            }
-                                            _ => {
-                                                // Not a navigation/select action, continue to text input
-                                            }
+                                    // Support arrow keys for navigation (better UX than j/k)
+                                    match event.code {
+                                        KeyCode::Up => {
+                                            state.previous_assignee();
+                                            return Ok(true);
+                                        }
+                                        KeyCode::Down => {
+                                            state.next_assignee();
+                                            return Ok(true);
+                                        }
+                                        _ => {
+                                            // All other keys go to text input (handled below)
                                         }
                                     }
 
@@ -418,29 +426,18 @@ impl Handler {
                                 }
                                 Some(crate::state::EditFormState::Section) => {
                                     // Handle section dropdown navigation and search
-                                    // Check for configured hotkeys first
-                                    if let Some(action) = get_action_for_event(
-                                        &event,
-                                        state.current_view(),
-                                        state.get_hotkeys(),
-                                    ) {
-                                        match action {
-                                            HotkeyAction::NavigateNext => {
-                                                state.next_section();
-                                                return Ok(true);
-                                            }
-                                            HotkeyAction::NavigatePrev => {
-                                                state.previous_section();
-                                                return Ok(true);
-                                            }
-                                            HotkeyAction::Select => {
-                                                state.select_current_section();
-                                                state.exit_field_editing_mode();
-                                                return Ok(true);
-                                            }
-                                            _ => {
-                                                // Not a navigation/select action, continue to text input
-                                            }
+                                    // Support arrow keys for navigation (better UX than j/k)
+                                    match event.code {
+                                        KeyCode::Up => {
+                                            state.previous_section();
+                                            return Ok(true);
+                                        }
+                                        KeyCode::Down => {
+                                            state.next_section();
+                                            return Ok(true);
+                                        }
+                                        _ => {
+                                            // All other keys go to text input (handled below)
                                         }
                                     }
 
@@ -521,91 +518,50 @@ impl Handler {
                                                 return Ok(true);
                                             };
 
-                                            // Check for configured hotkeys first
-                                            if let Some(action) = get_action_for_event(
-                                                &event,
-                                                state.current_view(),
-                                                state.get_hotkeys(),
-                                            ) {
-                                                match action {
-                                                    HotkeyAction::NavigateNext => {
-                                                        let filtered_count = enum_options
-                                                            .iter()
-                                                            .filter(|eo| {
-                                                                eo.enabled
-                                                                    && (search.is_empty()
-                                                                        || eo
-                                                                            .name
-                                                                            .to_lowercase()
-                                                                            .contains(
-                                                                                &search
-                                                                                    .to_lowercase(),
-                                                                            ))
-                                                            })
-                                                            .count();
-                                                        state.next_custom_field_enum(
-                                                            &cf_gid,
-                                                            filtered_count,
-                                                        );
-                                                        return Ok(true);
-                                                    }
-                                                    HotkeyAction::NavigatePrev => {
-                                                        let filtered_count = enum_options
-                                                            .iter()
-                                                            .filter(|eo| {
-                                                                eo.enabled
-                                                                    && (search.is_empty()
-                                                                        || eo
-                                                                            .name
-                                                                            .to_lowercase()
-                                                                            .contains(
-                                                                                &search
-                                                                                    .to_lowercase(),
-                                                                            ))
-                                                            })
-                                                            .count();
-                                                        state.previous_custom_field_enum(
-                                                            &cf_gid,
-                                                            filtered_count,
-                                                        );
-                                                        return Ok(true);
-                                                    }
-                                                    HotkeyAction::Select => {
-                                                        // Select current enum option
-                                                        let filtered: Vec<_> = enum_options
-                                                            .iter()
-                                                            .filter(|eo| {
-                                                                eo.enabled
-                                                                    && (search.is_empty()
-                                                                        || eo
-                                                                            .name
-                                                                            .to_lowercase()
-                                                                            .contains(
-                                                                                &search
-                                                                                    .to_lowercase(),
-                                                                            ))
-                                                            })
-                                                            .collect();
-                                                        let current_idx = state
-                                                            .get_custom_field_dropdown_index(
-                                                                &cf_gid,
-                                                            );
-                                                        if let Some(selected) =
-                                                            filtered.get(current_idx.min(
-                                                                filtered.len().saturating_sub(1),
-                                                            ))
-                                                        {
-                                                            state.select_custom_field_enum(
-                                                                cf_gid.clone(),
-                                                                selected.gid.clone(),
-                                                            );
-                                                            state.exit_field_editing_mode();
-                                                        }
-                                                        return Ok(true);
-                                                    }
-                                                    _ => {
-                                                        // Not a navigation/select action, continue to text input
-                                                    }
+                                            // Support arrow keys for navigation (better UX than j/k)
+                                            match event.code {
+                                                KeyCode::Up => {
+                                                    let filtered_count = enum_options
+                                                        .iter()
+                                                        .filter(|eo| {
+                                                            eo.enabled
+                                                                && (search.is_empty()
+                                                                    || eo
+                                                                        .name
+                                                                        .to_lowercase()
+                                                                        .contains(
+                                                                            &search.to_lowercase(),
+                                                                        ))
+                                                        })
+                                                        .count();
+                                                    state.previous_custom_field_enum(
+                                                        &cf_gid,
+                                                        filtered_count,
+                                                    );
+                                                    return Ok(true);
+                                                }
+                                                KeyCode::Down => {
+                                                    let filtered_count = enum_options
+                                                        .iter()
+                                                        .filter(|eo| {
+                                                            eo.enabled
+                                                                && (search.is_empty()
+                                                                    || eo
+                                                                        .name
+                                                                        .to_lowercase()
+                                                                        .contains(
+                                                                            &search.to_lowercase(),
+                                                                        ))
+                                                        })
+                                                        .count();
+                                                    state.next_custom_field_enum(
+                                                        &cf_gid,
+                                                        filtered_count,
+                                                    );
+                                                    return Ok(true);
+                                                }
+                                                _ => {
+                                                    // All other keys go to text input (handled below)
                                                 }
                                             }
 
@@ -646,89 +602,138 @@ impl Handler {
                                                 return Ok(true);
                                             };
 
-                                            // Check for configured hotkeys first
-                                            if let Some(action) = get_action_for_event(
-                                                &event,
-                                                state.current_view(),
-                                                state.get_hotkeys(),
-                                            ) {
-                                                match action {
-                                                    HotkeyAction::NavigateNext => {
-                                                        let filtered_count = enum_options
-                                                            .iter()
-                                                            .filter(|eo| {
-                                                                eo.enabled
-                                                                    && (search.is_empty()
-                                                                        || eo
-                                                                            .name
-                                                                            .to_lowercase()
-                                                                            .contains(
-                                                                                &search
-                                                                                    .to_lowercase(),
-                                                                            ))
-                                                            })
-                                                            .count();
-                                                        state.next_custom_field_enum(
-                                                            &cf_gid,
-                                                            filtered_count,
-                                                        );
-                                                        return Ok(true);
-                                                    }
-                                                    HotkeyAction::NavigatePrev => {
-                                                        let filtered_count = enum_options
-                                                            .iter()
-                                                            .filter(|eo| {
-                                                                eo.enabled
-                                                                    && (search.is_empty()
-                                                                        || eo
-                                                                            .name
-                                                                            .to_lowercase()
-                                                                            .contains(
-                                                                                &search
-                                                                                    .to_lowercase(),
-                                                                            ))
-                                                            })
-                                                            .count();
-                                                        state.previous_custom_field_enum(
-                                                            &cf_gid,
-                                                            filtered_count,
-                                                        );
-                                                        return Ok(true);
-                                                    }
-                                                    HotkeyAction::Select => {
-                                                        // Toggle current enum option
-                                                        let filtered: Vec<_> = enum_options
-                                                            .iter()
-                                                            .filter(|eo| {
-                                                                eo.enabled
-                                                                    && (search.is_empty()
-                                                                        || eo
-                                                                            .name
-                                                                            .to_lowercase()
-                                                                            .contains(
-                                                                                &search
-                                                                                    .to_lowercase(),
-                                                                            ))
-                                                            })
-                                                            .collect();
-                                                        let current_idx = state
-                                                            .get_custom_field_dropdown_index(
-                                                                &cf_gid,
-                                                            );
-                                                        if let Some(selected) =
-                                                            filtered.get(current_idx.min(
-                                                                filtered.len().saturating_sub(1),
-                                                            ))
-                                                        {
-                                                            state.toggle_custom_field_multi_enum(
-                                                                &cf_gid,
-                                                                selected.gid.clone(),
-                                                            );
+                                            // Support arrow keys for navigation (better UX than j/k)
+                                            match event.code {
+                                                KeyCode::Up => {
+                                                    let filtered_count = enum_options
+                                                        .iter()
+                                                        .filter(|eo| {
+                                                            eo.enabled
+                                                                && (search.is_empty()
+                                                                    || eo
+                                                                        .name
+                                                                        .to_lowercase()
+                                                                        .contains(
+                                                                            &search.to_lowercase(),
+                                                                        ))
+                                                        })
+                                                        .count();
+                                                    state.previous_custom_field_enum(
+                                                        &cf_gid,
+                                                        filtered_count,
+                                                    );
+                                                    return Ok(true);
+                                                }
+                                                KeyCode::Down => {
+                                                    let filtered_count = enum_options
+                                                        .iter()
+                                                        .filter(|eo| {
+                                                            eo.enabled
+                                                                && (search.is_empty()
+                                                                    || eo
+                                                                        .name
+                                                                        .to_lowercase()
+                                                                        .contains(
+                                                                            &search.to_lowercase(),
+                                                                        ))
+                                                        })
+                                                        .count();
+                                                    state.next_custom_field_enum(
+                                                        &cf_gid,
+                                                        filtered_count,
+                                                    );
+                                                    return Ok(true);
+                                                }
+                                                _ => {
+                                                    // Check for configured hotkeys (j/k) as fallback
+                                                    if let Some(action) = get_action_for_event(
+                                                        &event,
+                                                        state.current_view(),
+                                                        state.get_hotkeys(),
+                                                    ) {
+                                                        match action {
+                                                            HotkeyAction::NavigateNext => {
+                                                                let filtered_count = enum_options
+                                                                    .iter()
+                                                                    .filter(|eo| {
+                                                                        eo.enabled
+                                                                            && (search.is_empty()
+                                                                                || eo
+                                                                                    .name
+                                                                                    .to_lowercase()
+                                                                                    .contains(
+                                                                                        &search
+                                                                                            .to_lowercase(),
+                                                                                    ))
+                                                                    })
+                                                                    .count();
+                                                                state.next_custom_field_enum(
+                                                                    &cf_gid,
+                                                                    filtered_count,
+                                                                );
+                                                                return Ok(true);
+                                                            }
+                                                            HotkeyAction::NavigatePrev => {
+                                                                let filtered_count = enum_options
+                                                                    .iter()
+                                                                    .filter(|eo| {
+                                                                        eo.enabled
+                                                                            && (search.is_empty()
+                                                                                || eo
+                                                                                    .name
+                                                                                    .to_lowercase()
+                                                                                    .contains(
+                                                                                        &search
+                                                                                            .to_lowercase(),
+                                                                                    ))
+                                                                    })
+                                                                    .count();
+                                                                state.previous_custom_field_enum(
+                                                                    &cf_gid,
+                                                                    filtered_count,
+                                                                );
+                                                                return Ok(true);
+                                                            }
+                                                            HotkeyAction::Select => {
+                                                                // Toggle current enum option
+                                                                let filtered: Vec<_> = enum_options
+                                                                    .iter()
+                                                                    .filter(|eo| {
+                                                                        eo.enabled
+                                                                            && (search.is_empty()
+                                                                                || eo
+                                                                                    .name
+                                                                                    .to_lowercase()
+                                                                                    .contains(
+                                                                                        &search
+                                                                                            .to_lowercase(),
+                                                                                    ))
+                                                                    })
+                                                                    .collect();
+                                                                let current_idx = state
+                                                                    .get_custom_field_dropdown_index(
+                                                                        &cf_gid,
+                                                                    );
+                                                                if let Some(selected) = filtered
+                                                                    .get(
+                                                                        current_idx.min(
+                                                                            filtered
+                                                                                .len()
+                                                                                .saturating_sub(1),
+                                                                        ),
+                                                                    )
+                                                                {
+                                                                    state.toggle_custom_field_multi_enum(
+                                                                        &cf_gid,
+                                                                        selected.gid.clone(),
+                                                                    );
+                                                                }
+                                                                return Ok(true);
+                                                            }
+                                                            _ => {
+                                                                // Not a navigation/select action, continue to text input
+                                                            }
                                                         }
-                                                        return Ok(true);
-                                                    }
-                                                    _ => {
-                                                        // Not a navigation/select action, continue to text input
                                                     }
                                                 }
                                             }
@@ -767,80 +772,122 @@ impl Handler {
                                                 )
                                             };
 
-                                            // Check for configured hotkeys first
-                                            if let Some(action) = get_action_for_event(
-                                                &event,
-                                                state.current_view(),
-                                                state.get_hotkeys(),
-                                            ) {
-                                                match action {
-                                                    HotkeyAction::NavigateNext => {
-                                                        let filtered_count = users
-                                                            .iter()
-                                                            .filter(|u| {
-                                                                search.is_empty()
-                                                                    || u.name
-                                                                        .to_lowercase()
-                                                                        .contains(
-                                                                            &search.to_lowercase(),
-                                                                        )
-                                                            })
-                                                            .count();
-                                                        state.next_custom_field_enum(
-                                                            &cf_gid,
-                                                            filtered_count,
-                                                        );
-                                                        return Ok(true);
-                                                    }
-                                                    HotkeyAction::NavigatePrev => {
-                                                        let filtered_count = users
-                                                            .iter()
-                                                            .filter(|u| {
-                                                                search.is_empty()
-                                                                    || u.name
-                                                                        .to_lowercase()
-                                                                        .contains(
-                                                                            &search.to_lowercase(),
-                                                                        )
-                                                            })
-                                                            .count();
-                                                        state.previous_custom_field_enum(
-                                                            &cf_gid,
-                                                            filtered_count,
-                                                        );
-                                                        return Ok(true);
-                                                    }
-                                                    HotkeyAction::Select => {
-                                                        // Toggle current person
-                                                        let filtered: Vec<_> = users
-                                                            .iter()
-                                                            .filter(|u| {
-                                                                search.is_empty()
-                                                                    || u.name
-                                                                        .to_lowercase()
-                                                                        .contains(
-                                                                            &search.to_lowercase(),
-                                                                        )
-                                                            })
-                                                            .collect();
-                                                        let current_idx = state
-                                                            .get_custom_field_dropdown_index(
-                                                                &cf_gid,
-                                                            );
-                                                        if let Some(selected) =
-                                                            filtered.get(current_idx.min(
-                                                                filtered.len().saturating_sub(1),
-                                                            ))
-                                                        {
-                                                            state.toggle_custom_field_people(
-                                                                &cf_gid,
-                                                                selected.gid.clone(),
-                                                            );
+                                            // Support arrow keys for navigation (better UX than j/k)
+                                            match event.code {
+                                                KeyCode::Up => {
+                                                    let filtered_count = users
+                                                        .iter()
+                                                        .filter(|u| {
+                                                            search.is_empty()
+                                                                || u.name.to_lowercase().contains(
+                                                                    &search.to_lowercase(),
+                                                                )
+                                                        })
+                                                        .count();
+                                                    state.previous_custom_field_enum(
+                                                        &cf_gid,
+                                                        filtered_count,
+                                                    );
+                                                    return Ok(true);
+                                                }
+                                                KeyCode::Down => {
+                                                    let filtered_count = users
+                                                        .iter()
+                                                        .filter(|u| {
+                                                            search.is_empty()
+                                                                || u.name.to_lowercase().contains(
+                                                                    &search.to_lowercase(),
+                                                                )
+                                                        })
+                                                        .count();
+                                                    state.next_custom_field_enum(
+                                                        &cf_gid,
+                                                        filtered_count,
+                                                    );
+                                                    return Ok(true);
+                                                }
+                                                _ => {
+                                                    // Check for configured hotkeys (j/k) as fallback
+                                                    if let Some(action) = get_action_for_event(
+                                                        &event,
+                                                        state.current_view(),
+                                                        state.get_hotkeys(),
+                                                    ) {
+                                                        match action {
+                                                            HotkeyAction::NavigateNext => {
+                                                                let filtered_count = users
+                                                                    .iter()
+                                                                    .filter(|u| {
+                                                                        search.is_empty()
+                                                                            || u.name
+                                                                                .to_lowercase()
+                                                                                .contains(
+                                                                                    &search.to_lowercase(),
+                                                                                )
+                                                                    })
+                                                                    .count();
+                                                                state.next_custom_field_enum(
+                                                                    &cf_gid,
+                                                                    filtered_count,
+                                                                );
+                                                                return Ok(true);
+                                                            }
+                                                            HotkeyAction::NavigatePrev => {
+                                                                let filtered_count = users
+                                                                    .iter()
+                                                                    .filter(|u| {
+                                                                        search.is_empty()
+                                                                            || u.name
+                                                                                .to_lowercase()
+                                                                                .contains(
+                                                                                    &search.to_lowercase(),
+                                                                                )
+                                                                    })
+                                                                    .count();
+                                                                state.previous_custom_field_enum(
+                                                                    &cf_gid,
+                                                                    filtered_count,
+                                                                );
+                                                                return Ok(true);
+                                                            }
+                                                            HotkeyAction::Select => {
+                                                                // Toggle current person
+                                                                let filtered: Vec<_> = users
+                                                                    .iter()
+                                                                    .filter(|u| {
+                                                                        search.is_empty()
+                                                                            || u.name
+                                                                                .to_lowercase()
+                                                                                .contains(
+                                                                                    &search.to_lowercase(),
+                                                                                )
+                                                                    })
+                                                                    .collect();
+                                                                let current_idx = state
+                                                                    .get_custom_field_dropdown_index(
+                                                                        &cf_gid,
+                                                                    );
+                                                                if let Some(selected) = filtered
+                                                                    .get(
+                                                                        current_idx.min(
+                                                                            filtered
+                                                                                .len()
+                                                                                .saturating_sub(1),
+                                                                        ),
+                                                                    )
+                                                                {
+                                                                    state
+                                                                        .toggle_custom_field_people(
+                                                                            &cf_gid,
+                                                                            selected.gid.clone(),
+                                                                        );
+                                                                }
+                                                                return Ok(true);
+                                                            }
+                                                            _ => {
+                                                                // Not a navigation/select action, continue to text input
+                                                            }
                                                         }
-                                                        return Ok(true);
-                                                    }
-                                                    _ => {
-                                                        // Not a navigation/select action, continue to text input
                                                     }
                                                 }
                                             }
@@ -971,6 +1018,12 @@ impl Handler {
                         SpecialMode::ThemeSelector,
                         state.get_hotkeys(),
                     )
+                } else if state.has_assignee_filter() {
+                    get_action_for_special_mode(
+                        &event,
+                        SpecialMode::AssigneeFilter,
+                        state.get_hotkeys(),
+                    )
                 } else if state.has_move_task() {
                     get_action_for_special_mode(&event, SpecialMode::MoveTask, state.get_hotkeys())
                 } else if state.is_debug_mode() {
@@ -994,6 +1047,12 @@ impl Handler {
                                 // In comment input mode, allow typing any character
                                 if let KeyCode::Char(c) = event.code {
                                     state.add_comment_char(c);
+                                    return Ok(true);
+                                }
+                            } else if state.has_assignee_filter() {
+                                // In assignee filter mode, allow typing for search
+                                if let KeyCode::Char(c) = event.code {
+                                    state.add_assignee_filter_search_char(c);
                                     return Ok(true);
                                 }
                             } else if matches!(
@@ -1028,6 +1087,8 @@ impl Handler {
                                     HotkeyAction::NavigateNext => {
                                         if state.has_theme_selector() {
                                             state.next_theme();
+                                        } else if state.has_assignee_filter() {
+                                            state.next_assignee_filter_option();
                                         } else if state.has_move_task() {
                                             state.next_section();
                                         } else if state.is_debug_mode() {
@@ -1148,6 +1209,8 @@ impl Handler {
                                     HotkeyAction::NavigatePrev => {
                                         if state.has_theme_selector() {
                                             state.previous_theme();
+                                        } else if state.has_assignee_filter() {
+                                            state.previous_assignee_filter_option();
                                         } else if state.has_move_task() {
                                             state.previous_section();
                                         } else if state.is_debug_mode() {
@@ -1276,6 +1339,12 @@ impl Handler {
                                     } else {
                                         state.add_comment_char(c);
                                     }
+                                    return Ok(true);
+                                }
+                            } else if state.has_assignee_filter() {
+                                // In assignee filter mode, allow typing for search
+                                if let KeyCode::Char(c) = event.code {
+                                    state.add_assignee_filter_search_char(c);
                                     return Ok(true);
                                 }
                             } else if matches!(
@@ -1514,6 +1583,45 @@ impl Handler {
                     {
                         state.add_section_search_char(c);
                     }
+                    // Handle assignee filter search input - all character keys go to search
+                    KeyEvent {
+                        code: KeyCode::Char(c),
+                        modifiers: KeyModifiers::NONE,
+                        ..
+                    } if state.has_assignee_filter() => {
+                        state.add_assignee_filter_search_char(c);
+                        return Ok(true);
+                    }
+                    KeyEvent {
+                        code: KeyCode::Char(c),
+                        modifiers: KeyModifiers::SHIFT,
+                        ..
+                    } if state.has_assignee_filter() => {
+                        state.add_assignee_filter_search_char(c);
+                        return Ok(true);
+                    }
+                    KeyEvent {
+                        code: KeyCode::Backspace,
+                        modifiers: KeyModifiers::NONE,
+                        ..
+                    } if state.has_assignee_filter() => {
+                        state.backspace_assignee_filter_search();
+                        return Ok(true);
+                    }
+                    // Handle arrow keys for assignee filter navigation
+                    KeyEvent {
+                        code: KeyCode::Up, ..
+                    } if state.has_assignee_filter() => {
+                        state.previous_assignee_filter_option();
+                        return Ok(true);
+                    }
+                    KeyEvent {
+                        code: KeyCode::Down,
+                        ..
+                    } if state.has_assignee_filter() => {
+                        state.next_assignee_filter_option();
+                        return Ok(true);
+                    }
                     KeyEvent {
                         code: KeyCode::Char(c),
                         modifiers: KeyModifiers::SHIFT,
@@ -1599,6 +1707,21 @@ impl Handler {
                             // Fallback to default behavior
                             debug!("Processing cancel theme selector event '{:?}'...", event);
                             state.close_theme_selector();
+                        } else if state.has_assignee_filter() {
+                            if let Some(HotkeyAction::AssigneeFilterCancel) =
+                                get_action_for_special_mode(
+                                    &event,
+                                    SpecialMode::AssigneeFilter,
+                                    state.get_hotkeys(),
+                                )
+                            {
+                                debug!("Processing cancel assignee filter event '{:?}'...", event);
+                                state.close_assignee_filter();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
+                            debug!("Processing cancel assignee filter event '{:?}'...", event);
+                            state.close_assignee_filter();
                         } else if state.has_move_task() {
                             if let Some(HotkeyAction::MoveTaskCancel) = get_action_for_special_mode(
                                 &event,
@@ -1999,6 +2122,22 @@ impl Handler {
                             // Fallback to default behavior
                             debug!("Processing select theme event '{:?}'...", event);
                             state.select_theme();
+                        } else if state.has_assignee_filter() {
+                            if let Some(HotkeyAction::AssigneeFilterSelect) =
+                                get_action_for_special_mode(
+                                    &event,
+                                    SpecialMode::AssigneeFilter,
+                                    state.get_hotkeys(),
+                                )
+                            {
+                                // In assignee filter modal, Enter selects the assignee and applies filter
+                                debug!("Selecting assignee filter...");
+                                state.select_assignee_filter();
+                                return Ok(true);
+                            }
+                            // Fallback to default behavior
+                            debug!("Selecting assignee filter...");
+                            state.select_assignee_filter();
                         } else if state.has_move_task() {
                             if let Some(HotkeyAction::MoveTaskConfirm) = get_action_for_special_mode(
                                 &event,

@@ -36,6 +36,7 @@ pub enum HotkeyAction {
     ToggleTaskComplete,
     DeleteTask,
     Back,
+    FilterByAssignee,
 
     // TaskDetail view actions
     EditTask,
@@ -55,6 +56,8 @@ pub enum HotkeyAction {
     MoveTaskCancel,
     ThemeSelectorSelect,
     ThemeSelectorCancel,
+    AssigneeFilterSelect,
+    AssigneeFilterCancel,
 }
 
 /// Represents a key combination (KeyCode + modifiers).
@@ -269,6 +272,8 @@ pub struct ViewHotkeys {
     pub move_task: HashMap<HotkeyAction, Hotkey>,
     #[serde(default = "HashMap::new", skip_serializing_if = "HashMap::is_empty")]
     pub theme_selector: HashMap<HotkeyAction, Hotkey>,
+    #[serde(default = "HashMap::new", skip_serializing_if = "HashMap::is_empty")]
+    pub assignee_filter: HashMap<HotkeyAction, Hotkey>,
 }
 
 impl Default for ViewHotkeys {
@@ -300,6 +305,7 @@ impl ViewHotkeys {
             delete_confirmation: HashMap::new(),
             move_task: HashMap::new(),
             theme_selector: HashMap::new(),
+            assignee_filter: HashMap::new(),
         };
 
         // Check if any global navigation action is overridden
@@ -318,6 +324,7 @@ impl ViewHotkeys {
                 &self.debug_mode,
                 &self.move_task,
                 &self.theme_selector,
+                &self.assignee_filter,
             ] {
                 if let Some(hotkey) = view_hotkeys.get(action) {
                     if Some(hotkey) != default_hotkey {
@@ -436,7 +443,8 @@ impl ViewHotkeys {
                 .or_else(|| overrides.edit_task.get(action))
                 .or_else(|| overrides.debug_mode.get(action))
                 .or_else(|| overrides.move_task.get(action))
-                .or_else(|| overrides.theme_selector.get(action));
+                .or_else(|| overrides.theme_selector.get(action))
+                .or_else(|| overrides.assignee_filter.get(action));
 
             if let Some(hotkey) = override_hotkey {
                 // Apply the override globally to all views
@@ -448,6 +456,9 @@ impl ViewHotkeys {
                 merged.debug_mode.insert(action.clone(), hotkey.clone());
                 merged.move_task.insert(action.clone(), hotkey.clone());
                 merged.theme_selector.insert(action.clone(), hotkey.clone());
+                merged
+                    .assignee_filter
+                    .insert(action.clone(), hotkey.clone());
             }
         }
 
@@ -500,6 +511,13 @@ impl ViewHotkeys {
                 merged.theme_selector.insert(action.clone(), hotkey.clone());
             }
         }
+        for (action, hotkey) in &overrides.assignee_filter {
+            if !global_nav_actions.contains(action) {
+                merged
+                    .assignee_filter
+                    .insert(action.clone(), hotkey.clone());
+            }
+        }
 
         merged
     }
@@ -540,6 +558,7 @@ pub fn get_hotkey_groups() -> Vec<HotkeyGroup> {
                 HotkeyAction::AddComment,
                 HotkeyAction::EditField,
                 HotkeyAction::SubmitForm,
+                HotkeyAction::FilterByAssignee,
             ],
         },
         HotkeyGroup {
@@ -577,6 +596,13 @@ pub fn get_hotkey_groups() -> Vec<HotkeyGroup> {
                 HotkeyAction::ThemeSelectorCancel,
             ],
         },
+        HotkeyGroup {
+            name: "Assignee Filter".to_string(),
+            actions: vec![
+                HotkeyAction::AssigneeFilterSelect,
+                HotkeyAction::AssigneeFilterCancel,
+            ],
+        },
     ]
 }
 
@@ -607,6 +633,7 @@ pub fn get_all_hotkeys_grouped(hotkeys: &ViewHotkeys) -> GroupedHotkeys {
                         .or_else(|| hotkeys.delete_confirmation.get(action))
                         .or_else(|| hotkeys.move_task.get(action))
                         .or_else(|| hotkeys.theme_selector.get(action))
+                        .or_else(|| hotkeys.assignee_filter.get(action))
                         .cloned();
                     (action.clone(), hotkey)
                 })
@@ -647,7 +674,8 @@ pub fn find_action_view(action: &HotkeyAction) -> Vec<View> {
         | HotkeyAction::MoveTask
         | HotkeyAction::ToggleTaskComplete
         | HotkeyAction::DeleteTask
-        | HotkeyAction::Back => {
+        | HotkeyAction::Back
+        | HotkeyAction::FilterByAssignee => {
             views.push(View::ProjectTasks);
         }
         HotkeyAction::EditTask | HotkeyAction::AddComment => {
@@ -676,6 +704,9 @@ pub fn find_action_view(action: &HotkeyAction) -> Vec<View> {
         }
         HotkeyAction::ThemeSelectorSelect | HotkeyAction::ThemeSelectorCancel => {
             views.push(View::Welcome);
+        }
+        HotkeyAction::AssigneeFilterSelect | HotkeyAction::AssigneeFilterCancel => {
+            views.push(View::ProjectTasks);
         }
         HotkeyAction::Cancel | HotkeyAction::Quit => {
             // Available in all views
@@ -776,6 +807,12 @@ pub fn update_hotkey_for_action(hotkeys: &mut ViewHotkeys, action: &HotkeyAction
                     .theme_selector
                     .insert(action.clone(), hotkey.clone());
             }
+            HotkeyAction::AssigneeFilterSelect | HotkeyAction::AssigneeFilterCancel => {
+                hotkeys.assignee_filter.remove(action);
+                hotkeys
+                    .assignee_filter
+                    .insert(action.clone(), hotkey.clone());
+            }
             _ => {}
         }
     }
@@ -816,6 +853,7 @@ fn remove_key_from_all_actions(
     remove_from_map(&mut hotkeys.delete_confirmation);
     remove_from_map(&mut hotkeys.move_task);
     remove_from_map(&mut hotkeys.theme_selector);
+    remove_from_map(&mut hotkeys.assignee_filter);
 }
 
 /// Helper to compare hotkeys without needing a KeyEvent.
@@ -994,6 +1032,13 @@ pub fn default_hotkeys() -> ViewHotkeys {
         HotkeyAction::Quit,
         Hotkey {
             code: KeyCode::Char('q'),
+            modifiers: KeyModifiers::empty(),
+        },
+    );
+    project_tasks.insert(
+        HotkeyAction::FilterByAssignee,
+        Hotkey {
+            code: KeyCode::Char('a'),
             modifiers: KeyModifiers::empty(),
         },
     );
@@ -1177,6 +1222,24 @@ pub fn default_hotkeys() -> ViewHotkeys {
         },
     );
 
+    let mut assignee_filter = HashMap::new();
+    // Apply global navigation actions
+    apply_global_navigation(&mut assignee_filter);
+    assignee_filter.insert(
+        HotkeyAction::AssigneeFilterSelect,
+        Hotkey {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::empty(),
+        },
+    );
+    assignee_filter.insert(
+        HotkeyAction::AssigneeFilterCancel,
+        Hotkey {
+            code: KeyCode::Esc,
+            modifiers: KeyModifiers::empty(),
+        },
+    );
+
     ViewHotkeys {
         welcome,
         project_tasks,
@@ -1188,6 +1251,7 @@ pub fn default_hotkeys() -> ViewHotkeys {
         delete_confirmation,
         move_task,
         theme_selector,
+        assignee_filter,
     }
 }
 
@@ -1231,6 +1295,7 @@ pub fn get_action_for_special_mode(
         SpecialMode::DeleteConfirmation => &hotkeys.delete_confirmation,
         SpecialMode::MoveTask => &hotkeys.move_task,
         SpecialMode::ThemeSelector => &hotkeys.theme_selector,
+        SpecialMode::AssigneeFilter => &hotkeys.assignee_filter,
     };
 
     mode_hotkeys
@@ -1248,6 +1313,7 @@ pub enum SpecialMode {
     DeleteConfirmation,
     MoveTask,
     ThemeSelector,
+    AssigneeFilter,
 }
 
 /// Builds a footer text string from hotkey configurations.

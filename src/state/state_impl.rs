@@ -52,6 +52,9 @@ pub struct State {
     move_task_gid: Option<String>,       // GID of task being moved (for section selection modal)
     theme_selector_open: bool,           // Whether theme selector modal is open
     theme_dropdown_index: usize,         // Selected index in theme selector
+    assignee_filter_open: bool,          // Whether assignee filter modal is open
+    assignee_filter_dropdown_index: usize, // Selected index in assignee filter dropdown
+    assignee_filter_search: String,      // Search text for assignee filter
     current_task_detail: Option<Task>,   // Currently viewed task with full details
     sections: Vec<Section>,              // Project sections for kanban
     workspace_users: Vec<User>,          // Users for assignment dropdowns
@@ -147,6 +150,9 @@ impl Default for State {
             move_task_gid: None,
             theme_selector_open: false,
             theme_dropdown_index: 0,
+            assignee_filter_open: false,
+            assignee_filter_dropdown_index: 0,
+            assignee_filter_search: String::new(),
             current_task_detail: None,
             sections: vec![],
             workspace_users: vec![],
@@ -521,6 +527,10 @@ impl State {
         // Close theme selector if pushing a non-Welcome view
         if !matches!(view, View::Welcome) {
             self.close_theme_selector();
+        }
+        // Close assignee filter if pushing a non-ProjectTasks view
+        if !matches!(view, View::ProjectTasks) {
+            self.close_assignee_filter();
         }
         self.view_stack.push(view);
         self
@@ -1245,6 +1255,150 @@ impl State {
     ///
     pub fn get_theme_dropdown_index(&self) -> usize {
         self.theme_dropdown_index
+    }
+
+    /// Check if assignee filter modal is open.
+    ///
+    pub fn has_assignee_filter(&self) -> bool {
+        self.assignee_filter_open
+    }
+
+    /// Open assignee filter modal.
+    ///
+    pub fn open_assignee_filter(&mut self) -> &mut Self {
+        self.assignee_filter_open = true;
+        self.assignee_filter_search.clear();
+        self.assignee_filter_dropdown_index = 0;
+        // Initialize dropdown index to match currently selected assignee filter (if any)
+        match &self.task_filter {
+            TaskFilter::All => {
+                // Index 0 is "All"
+                self.assignee_filter_dropdown_index = 0;
+            }
+            TaskFilter::Assignee(None) => {
+                // Index 1 is "Unassigned"
+                self.assignee_filter_dropdown_index = 1;
+            }
+            TaskFilter::Assignee(Some(selected_gid)) => {
+                let filtered_users = self.get_filtered_assignee_filter_users();
+                if let Some(index) = filtered_users.iter().position(|u| &u.gid == selected_gid) {
+                    // Index 0 is "All", index 1 is "Unassigned", so add 2
+                    self.assignee_filter_dropdown_index = index + 2;
+                }
+            }
+            _ => {
+                // For other filter types, default to "All"
+                self.assignee_filter_dropdown_index = 0;
+            }
+        }
+        self
+    }
+
+    /// Close assignee filter modal.
+    ///
+    pub fn close_assignee_filter(&mut self) -> &mut Self {
+        self.assignee_filter_open = false;
+        self.assignee_filter_search.clear();
+        self.assignee_filter_dropdown_index = 0;
+        self
+    }
+
+    /// Get assignee filter search text.
+    ///
+    pub fn get_assignee_filter_search(&self) -> &str {
+        &self.assignee_filter_search
+    }
+
+    /// Add a character to assignee filter search.
+    ///
+    pub fn add_assignee_filter_search_char(&mut self, c: char) -> &mut Self {
+        self.assignee_filter_search.push(c);
+        // Reset dropdown index when search changes
+        self.assignee_filter_dropdown_index = 0;
+        self
+    }
+
+    /// Remove last character from assignee filter search.
+    ///
+    pub fn backspace_assignee_filter_search(&mut self) -> &mut Self {
+        self.assignee_filter_search.pop();
+        // Reset dropdown index when search changes
+        self.assignee_filter_dropdown_index = 0;
+        self
+    }
+
+    /// Get assignee filter dropdown index.
+    ///
+    pub fn get_assignee_filter_dropdown_index(&self) -> usize {
+        self.assignee_filter_dropdown_index
+    }
+
+    /// Get filtered users for assignee filter (based on search).
+    ///
+    fn get_filtered_assignee_filter_users(&self) -> Vec<&User> {
+        self.workspace_users
+            .iter()
+            .filter(|user| {
+                self.assignee_filter_search.is_empty()
+                    || user
+                        .name
+                        .to_lowercase()
+                        .contains(&self.assignee_filter_search.to_lowercase())
+                    || user
+                        .email
+                        .to_lowercase()
+                        .contains(&self.assignee_filter_search.to_lowercase())
+            })
+            .collect()
+    }
+
+    /// Move to next assignee filter option.
+    ///
+    pub fn next_assignee_filter_option(&mut self) -> &mut Self {
+        let filtered = self.get_filtered_assignee_filter_users();
+        // Add 2 for "All" and "Unassigned" options at the beginning
+        let total = filtered.len() + 2;
+        if total > 0 {
+            self.assignee_filter_dropdown_index = (self.assignee_filter_dropdown_index + 1) % total;
+        }
+        self
+    }
+
+    /// Move to previous assignee filter option.
+    ///
+    pub fn previous_assignee_filter_option(&mut self) -> &mut Self {
+        let filtered = self.get_filtered_assignee_filter_users();
+        // Add 2 for "All" and "Unassigned" options at the beginning
+        let total = filtered.len() + 2;
+        if total > 0 {
+            if self.assignee_filter_dropdown_index == 0 {
+                self.assignee_filter_dropdown_index = total - 1;
+            } else {
+                self.assignee_filter_dropdown_index -= 1;
+            }
+        }
+        self
+    }
+
+    /// Select current assignee filter option and apply filter.
+    ///
+    pub fn select_assignee_filter(&mut self) -> &mut Self {
+        let filtered = self.get_filtered_assignee_filter_users();
+        // Index 0 is "All", index 1 is "Unassigned", indices 2+ are users
+        if self.assignee_filter_dropdown_index == 0 {
+            // Select "All" - clear filter
+            self.set_task_filter(TaskFilter::All);
+        } else if self.assignee_filter_dropdown_index == 1 {
+            // Select "Unassigned"
+            self.set_task_filter(TaskFilter::Assignee(None));
+        } else {
+            let user_index = self.assignee_filter_dropdown_index - 2;
+            if let Some(user) = filtered.get(user_index) {
+                self.set_task_filter(TaskFilter::Assignee(Some(user.gid.clone())));
+            }
+        }
+        self.close_assignee_filter();
+        self
     }
 
     /// Set theme dropdown index.
@@ -2252,14 +2406,6 @@ impl State {
             current - 1
         };
         self.set_custom_field_dropdown_index(gid.to_string(), new_idx);
-        self
-    }
-
-    /// Select current enum option for custom field.
-    ///
-    pub fn select_custom_field_enum(&mut self, gid: String, enum_gid: String) -> &mut Self {
-        self.form_custom_field_values
-            .insert(gid, CustomFieldValue::Enum(Some(enum_gid)));
         self
     }
 

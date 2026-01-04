@@ -76,6 +76,7 @@ fn format_hotkeys_for_view(view: &crate::state::View, state: &State) -> String {
                 (HotkeyAction::ViewTask, "view", None),
                 (HotkeyAction::CreateTask, "create", None),
                 (HotkeyAction::MoveTask, "move", None),
+                (HotkeyAction::FilterByAssignee, "filter by assignee", None),
                 (HotkeyAction::EnterSearch, "search", None),
                 (HotkeyAction::Back, "back", None),
                 (HotkeyAction::Quit, "quit", None),
@@ -179,6 +180,17 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
                 (HotkeyAction::MoveTaskCancel, "cancel", None),
             ],
         )
+    } else if state.has_assignee_filter() {
+        format!(
+            " Type to search, ↑↓: navigate, {}",
+            build_footer_text(
+                &hotkeys.assignee_filter,
+                &[
+                    (HotkeyAction::AssigneeFilterSelect, "select", None),
+                    (HotkeyAction::AssigneeFilterCancel, "cancel", None),
+                ],
+            )
+        )
     } else if state.is_theme_mode() {
         build_footer_text(
             &hotkeys.theme_selector,
@@ -262,6 +274,20 @@ pub fn footer(frame: &mut Frame, size: Rect, state: &State) {
         Line::from(vec![
             Span::styled(
                 "MOVE:",
+                Style::default()
+                    .fg(theme.text.to_color())
+                    .bg(theme.footer_move.to_color())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                controls_text.as_str(),
+                Style::default().fg(theme.warning.to_color()),
+            ),
+        ])
+    } else if state.has_assignee_filter() {
+        Line::from(vec![
+            Span::styled(
+                "FILTER:",
                 Style::default()
                     .fg(theme.text.to_color())
                     .bg(theme.footer_move.to_color())

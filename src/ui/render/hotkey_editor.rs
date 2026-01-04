@@ -212,6 +212,9 @@ fn format_action_name(action: &HotkeyAction) -> String {
         HotkeyAction::MoveTaskCancel => "Move Task Cancel".to_string(),
         HotkeyAction::ThemeSelectorSelect => "Theme Selector Select".to_string(),
         HotkeyAction::ThemeSelectorCancel => "Theme Selector Cancel".to_string(),
+        HotkeyAction::FilterByAssignee => "Filter By Assignee".to_string(),
+        HotkeyAction::AssigneeFilterSelect => "Assignee Filter Select".to_string(),
+        HotkeyAction::AssigneeFilterCancel => "Assignee Filter Cancel".to_string(),
     }
 }
 
