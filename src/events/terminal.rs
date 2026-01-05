@@ -26,9 +26,19 @@ const TICK_RATE_IN_MS: u64 = 60;
 ///
 fn try_execute_hotkey_action(event: &KeyEvent, state: &mut State) -> Result<Option<bool>> {
     // Don't check hotkeys in special modes - they have their own handling
+    // BUT allow SubmitForm even in field editing mode so users can submit while editing
+    // Uses configurable hotkey system (get_action_for_event) - not hardcoded keys
+    let is_submit_form = if let Some(action) =
+        get_action_for_event(event, state.current_view(), state.get_hotkeys())
+    {
+        matches!(action, HotkeyAction::SubmitForm)
+    } else {
+        false
+    };
+
     if state.is_search_mode()
         || state.is_debug_mode()
-        || state.is_field_editing_mode()
+        || (state.is_field_editing_mode() && !is_submit_form)
         || state.is_comment_input_mode()
         || state.has_delete_confirmation()
         || state.has_theme_selector()
@@ -114,9 +124,108 @@ fn try_execute_hotkey_action(event: &KeyEvent, state: &mut State) -> Result<Opti
                     state.current_view(),
                     crate::state::View::CreateTask | crate::state::View::EditTask
                 ) {
-                    // Submit form - the actual submission logic is complex and handled
-                    // by checking the hotkey action in the main event loop below.
-                    // This action will be caught and processed there.
+                    // Submit form - build form data and dispatch network event
+                    debug!("Processing submit form event '{:?}'...", event);
+
+                    // Exit field editing mode if active
+                    if state.is_field_editing_mode() {
+                        state.exit_field_editing_mode();
+                    }
+
+                    // Get form values
+                    let name = state.get_form_name().trim().to_string();
+                    if name.is_empty() {
+                        // Name is required - don't submit if empty
+                        warn!("Cannot submit form: task name is required");
+                        return Ok(Some(true));
+                    }
+
+                    let notes = state.get_form_notes();
+                    let notes_opt = if notes.trim().is_empty() {
+                        None
+                    } else {
+                        Some(notes)
+                    };
+
+                    let assignee = state.get_form_assignee().cloned();
+                    let due_on = {
+                        let due = state.get_form_due_on().trim();
+                        if due.is_empty() {
+                            None
+                        } else {
+                            Some(due.to_string())
+                        }
+                    };
+                    let section = state.get_form_section().cloned();
+                    let custom_fields = state.get_form_custom_field_values().clone();
+
+                    // Dispatch appropriate network event
+                    match state.current_view() {
+                        crate::state::View::CreateTask => {
+                            if let Some(project) = state.get_project() {
+                                state.dispatch(crate::events::network::Event::CreateTask {
+                                    project_gid: project.gid.clone(),
+                                    name,
+                                    notes: notes_opt,
+                                    assignee,
+                                    due_on,
+                                    section,
+                                    custom_fields,
+                                });
+                                // Navigate back after creating
+                                state.pop_view();
+                            }
+                        }
+                        crate::state::View::EditTask => {
+                            if let Some(task) = state.get_task_detail() {
+                                // For edit, only send changed fields
+                                let name_opt = if name != state.get_original_form_name() {
+                                    Some(name)
+                                } else {
+                                    None
+                                };
+                                let notes_opt = if notes_opt.as_deref()
+                                    != Some(state.get_original_form_notes())
+                                {
+                                    notes_opt
+                                } else {
+                                    None
+                                };
+                                let assignee_opt =
+                                    if assignee != *state.get_original_form_assignee() {
+                                        assignee
+                                    } else {
+                                        None
+                                    };
+                                let due_on_opt = if due_on.as_deref()
+                                    != Some(state.get_original_form_due_on())
+                                {
+                                    due_on
+                                } else {
+                                    None
+                                };
+                                let section_opt = if section != *state.get_original_form_section() {
+                                    section
+                                } else {
+                                    None
+                                };
+
+                                state.dispatch(crate::events::network::Event::UpdateTaskFields {
+                                    gid: task.gid.clone(),
+                                    name: name_opt,
+                                    notes: notes_opt,
+                                    assignee: assignee_opt,
+                                    due_on: due_on_opt,
+                                    section: section_opt,
+                                    completed: None,
+                                    custom_fields,
+                                });
+                                // Navigate back after updating
+                                state.pop_view();
+                            }
+                        }
+                        _ => {}
+                    }
                     return Ok(Some(true));
                 }
             }
@@ -399,8 +508,42 @@ impl Handler {
                                             state.next_assignee();
                                             return Ok(true);
                                         }
+                                        KeyCode::Enter => {
+                                            // Enter key: select current assignee and close dropdown
+                                            // (In field editing mode, Enter selects in comboboxes, not EditField)
+                                            state.select_current_assignee();
+                                            state.exit_field_editing_mode();
+                                            return Ok(true);
+                                        }
                                         _ => {
-                                            // All other keys go to text input (handled below)
+                                            // Check for configured hotkeys (j/k for navigation, Enter for select)
+                                            if let Some(action) = get_action_for_event(
+                                                &event,
+                                                state.current_view(),
+                                                state.get_hotkeys(),
+                                            ) {
+                                                match action {
+                                                    HotkeyAction::NavigateNext => {
+                                                        state.next_assignee();
+                                                        return Ok(true);
+                                                    }
+                                                    HotkeyAction::NavigatePrev => {
+                                                        state.previous_assignee();
+                                                        return Ok(true);
+                                                    }
+                                                    HotkeyAction::Select
+                                                    | HotkeyAction::EditField => {
+                                                        // In field editing mode with combobox, Enter should select
+                                                        // (EditField is bound to Enter in CreateTask/EditTask, but in comboboxes it means select)
+                                                        state.select_current_assignee();
+                                                        state.exit_field_editing_mode();
+                                                        return Ok(true);
+                                                    }
+                                                    _ => {
+                                                        // Not a navigation/select action, continue to text input
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
 
@@ -436,8 +579,42 @@ impl Handler {
                                             state.next_section();
                                             return Ok(true);
                                         }
+                                        KeyCode::Enter => {
+                                            // Enter key: select current section and close dropdown
+                                            // (In field editing mode, Enter selects in comboboxes, not EditField)
+                                            state.select_current_section();
+                                            state.exit_field_editing_mode();
+                                            return Ok(true);
+                                        }
                                         _ => {
-                                            // All other keys go to text input (handled below)
+                                            // Check for configured hotkeys (j/k for navigation, Enter for select)
+                                            if let Some(action) = get_action_for_event(
+                                                &event,
+                                                state.current_view(),
+                                                state.get_hotkeys(),
+                                            ) {
+                                                match action {
+                                                    HotkeyAction::NavigateNext => {
+                                                        state.next_section();
+                                                        return Ok(true);
+                                                    }
+                                                    HotkeyAction::NavigatePrev => {
+                                                        state.previous_section();
+                                                        return Ok(true);
+                                                    }
+                                                    HotkeyAction::Select
+                                                    | HotkeyAction::EditField => {
+                                                        // In field editing mode with combobox, Enter should select
+                                                        // (EditField is bound to Enter in CreateTask/EditTask, but in comboboxes it means select)
+                                                        state.select_current_section();
+                                                        state.exit_field_editing_mode();
+                                                        return Ok(true);
+                                                    }
+                                                    _ => {
+                                                        // Not a navigation/select action, continue to text input
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
 
@@ -560,8 +737,133 @@ impl Handler {
                                                     );
                                                     return Ok(true);
                                                 }
+                                                KeyCode::Enter => {
+                                                    // Enter key: select current enum option and close dropdown
+                                                    // (In field editing mode, Enter selects in comboboxes, not EditField)
+                                                    let filtered: Vec<_> = enum_options
+                                                        .iter()
+                                                        .filter(|eo| {
+                                                            eo.enabled
+                                                                && (search.is_empty()
+                                                                    || eo
+                                                                        .name
+                                                                        .to_lowercase()
+                                                                        .contains(
+                                                                            &search.to_lowercase(),
+                                                                        ))
+                                                        })
+                                                        .collect();
+                                                    let current_idx = state
+                                                        .get_custom_field_dropdown_index(&cf_gid);
+                                                    if let Some(selected) = filtered.get(
+                                                        current_idx
+                                                            .min(filtered.len().saturating_sub(1)),
+                                                    ) {
+                                                        state.set_custom_field_value(
+                                                            cf_gid.clone(),
+                                                            crate::state::CustomFieldValue::Enum(
+                                                                Some(selected.gid.clone()),
+                                                            ),
+                                                        );
+                                                        state.exit_field_editing_mode();
+                                                    }
+                                                    return Ok(true);
+                                                }
                                                 _ => {
-                                                    // All other keys go to text input (handled below)
+                                                    // Check for configured hotkeys (j/k for navigation, Enter for select)
+                                                    if let Some(action) = get_action_for_event(
+                                                        &event,
+                                                        state.current_view(),
+                                                        state.get_hotkeys(),
+                                                    ) {
+                                                        match action {
+                                                            HotkeyAction::NavigateNext => {
+                                                                let filtered_count = enum_options
+                                                                    .iter()
+                                                                    .filter(|eo| {
+                                                                        eo.enabled
+                                                                            && (search.is_empty()
+                                                                                || eo
+                                                                                    .name
+                                                                                    .to_lowercase()
+                                                                                    .contains(
+                                                                                        &search
+                                                                                            .to_lowercase(),
+                                                                                    ))
+                                                                    })
+                                                                    .count();
+                                                                state.next_custom_field_enum(
+                                                                    &cf_gid,
+                                                                    filtered_count,
+                                                                );
+                                                                return Ok(true);
+                                                            }
+                                                            HotkeyAction::NavigatePrev => {
+                                                                let filtered_count = enum_options
+                                                                    .iter()
+                                                                    .filter(|eo| {
+                                                                        eo.enabled
+                                                                            && (search.is_empty()
+                                                                                || eo
+                                                                                    .name
+                                                                                    .to_lowercase()
+                                                                                    .contains(
+                                                                                        &search
+                                                                                            .to_lowercase(),
+                                                                                    ))
+                                                                    })
+                                                                    .count();
+                                                                state.previous_custom_field_enum(
+                                                                    &cf_gid,
+                                                                    filtered_count,
+                                                                );
+                                                                return Ok(true);
+                                                            }
+                                                            HotkeyAction::Select
+                                                            | HotkeyAction::EditField => {
+                                                                // In field editing mode with combobox, Enter should select
+                                                                // (EditField is bound to Enter in CreateTask/EditTask, but in comboboxes it means select)
+                                                                let filtered: Vec<_> = enum_options
+                                                                    .iter()
+                                                                    .filter(|eo| {
+                                                                        eo.enabled
+                                                                            && (search.is_empty()
+                                                                                || eo
+                                                                                    .name
+                                                                                    .to_lowercase()
+                                                                                    .contains(
+                                                                                        &search
+                                                                                            .to_lowercase(),
+                                                                                    ))
+                                                                    })
+                                                                    .collect();
+                                                                let current_idx = state
+                                                                    .get_custom_field_dropdown_index(
+                                                                        &cf_gid,
+                                                                    );
+                                                                if let Some(selected) = filtered
+                                                                    .get(
+                                                                        current_idx.min(
+                                                                            filtered
+                                                                                .len()
+                                                                                .saturating_sub(1),
+                                                                        ),
+                                                                    )
+                                                                {
+                                                                    state.set_custom_field_value(
+                                                                        cf_gid.clone(),
+                                                                        crate::state::CustomFieldValue::Enum(
+                                                                            Some(selected.gid.clone()),
+                                                                        ),
+                                                                    );
+                                                                }
+                                                                return Ok(true);
+                                                            }
+                                                            _ => {
+                                                                // Not a navigation/select action, continue to text input
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
 
@@ -644,6 +946,37 @@ impl Handler {
                                                     );
                                                     return Ok(true);
                                                 }
+                                                KeyCode::Enter => {
+                                                    // Enter key: toggle current enum option and close dropdown
+                                                    // (In field editing mode, Enter selects in comboboxes, not EditField)
+                                                    let filtered: Vec<_> = enum_options
+                                                        .iter()
+                                                        .filter(|eo| {
+                                                            eo.enabled
+                                                                && (search.is_empty()
+                                                                    || eo
+                                                                        .name
+                                                                        .to_lowercase()
+                                                                        .contains(
+                                                                            &search.to_lowercase(),
+                                                                        ))
+                                                        })
+                                                        .collect();
+                                                    let current_idx = state
+                                                        .get_custom_field_dropdown_index(&cf_gid);
+                                                    if let Some(selected) = filtered.get(
+                                                        current_idx
+                                                            .min(filtered.len().saturating_sub(1)),
+                                                    ) {
+                                                        state.toggle_custom_field_multi_enum(
+                                                            &cf_gid,
+                                                            selected.gid.clone(),
+                                                        );
+                                                        // Don't close dropdown for multi-select - user can select multiple items
+                                                        // Dropdown closes on Escape
+                                                    }
+                                                    return Ok(true);
+                                                }
                                                 _ => {
                                                     // Check for configured hotkeys (j/k) as fallback
                                                     if let Some(action) = get_action_for_event(
@@ -694,8 +1027,10 @@ impl Handler {
                                                                 );
                                                                 return Ok(true);
                                                             }
-                                                            HotkeyAction::Select => {
-                                                                // Toggle current enum option
+                                                            HotkeyAction::Select
+                                                            | HotkeyAction::EditField => {
+                                                                // In field editing mode with combobox, Enter should select
+                                                                // (EditField is bound to Enter in CreateTask/EditTask, but in comboboxes it means select)
                                                                 let filtered: Vec<_> = enum_options
                                                                     .iter()
                                                                     .filter(|eo| {
@@ -727,6 +1062,8 @@ impl Handler {
                                                                         &cf_gid,
                                                                         selected.gid.clone(),
                                                                     );
+                                                                    // Don't close dropdown for multi-select - user can select multiple items
+                                                                    // Dropdown closes on Escape
                                                                 }
                                                                 return Ok(true);
                                                             }
@@ -806,6 +1143,33 @@ impl Handler {
                                                     );
                                                     return Ok(true);
                                                 }
+                                                KeyCode::Enter => {
+                                                    // Enter key: toggle current person and close dropdown
+                                                    // (In field editing mode, Enter selects in comboboxes, not EditField)
+                                                    let filtered: Vec<_> = users
+                                                        .iter()
+                                                        .filter(|u| {
+                                                            search.is_empty()
+                                                                || u.name.to_lowercase().contains(
+                                                                    &search.to_lowercase(),
+                                                                )
+                                                        })
+                                                        .collect();
+                                                    let current_idx = state
+                                                        .get_custom_field_dropdown_index(&cf_gid);
+                                                    if let Some(selected) = filtered.get(
+                                                        current_idx
+                                                            .min(filtered.len().saturating_sub(1)),
+                                                    ) {
+                                                        state.toggle_custom_field_people(
+                                                            &cf_gid,
+                                                            selected.gid.clone(),
+                                                        );
+                                                        // Don't close dropdown for multi-select - user can select multiple items
+                                                        // Dropdown closes on Escape
+                                                    }
+                                                    return Ok(true);
+                                                }
                                                 _ => {
                                                     // Check for configured hotkeys (j/k) as fallback
                                                     if let Some(action) = get_action_for_event(
@@ -850,8 +1214,10 @@ impl Handler {
                                                                 );
                                                                 return Ok(true);
                                                             }
-                                                            HotkeyAction::Select => {
-                                                                // Toggle current person
+                                                            HotkeyAction::Select
+                                                            | HotkeyAction::EditField => {
+                                                                // In field editing mode with combobox, Enter should select
+                                                                // (EditField is bound to Enter in CreateTask/EditTask, but in comboboxes it means select)
                                                                 let filtered: Vec<_> = users
                                                                     .iter()
                                                                     .filter(|u| {
@@ -881,6 +1247,8 @@ impl Handler {
                                                                             &cf_gid,
                                                                             selected.gid.clone(),
                                                                         );
+                                                                    // Don't close dropdown for multi-select - user can select multiple items
+                                                                    // Dropdown closes on Escape
                                                                 }
                                                                 return Ok(true);
                                                             }
@@ -1951,7 +2319,31 @@ impl Handler {
                         modifiers: KeyModifiers::NONE,
                         ..
                     } => {
-                        // First, check if we're in a text input mode
+                        // First, check for SubmitForm hotkey using configurable hotkey system
+                        // (not hardcoded - uses get_action_for_event to look up from hotkey config)
+                        // This must be checked before text input to allow submitting while editing
+                        if matches!(
+                            state.current_view(),
+                            crate::state::View::CreateTask | crate::state::View::EditTask
+                        ) {
+                            if let Some(action) = get_action_for_event(
+                                &event,
+                                state.current_view(),
+                                state.get_hotkeys(),
+                            ) {
+                                if matches!(action, HotkeyAction::SubmitForm) {
+                                    // Submit form - handled below in the main event loop
+                                    // Just return here to let it fall through to hotkey handler
+                                    if let Ok(Some(should_continue)) =
+                                        try_execute_hotkey_action(&event, state)
+                                    {
+                                        return Ok(should_continue);
+                                    }
+                                }
+                            }
+                        }
+
+                        // Then check if we're in a text input mode
                         if state.is_search_mode() {
                             debug!("Processing search character '{}' event '{:?}'...", c, event);
                             state.add_search_char(c);
@@ -2212,8 +2604,10 @@ impl Handler {
                         } else if matches!(
                             state.current_view(),
                             crate::state::View::CreateTask | crate::state::View::EditTask
-                        ) {
-                            // Handle form Enter key
+                        ) && !state.is_field_editing_mode()
+                        {
+                            // Handle form Enter key (only when NOT in field editing mode)
+                            // When in field editing mode, Enter is handled by the field-specific handlers above
                             match state.get_edit_form_state() {
                                 Some(crate::state::EditFormState::Name) => {
                                     state.set_edit_form_state(Some(
