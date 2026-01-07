@@ -19,6 +19,7 @@ cargo run --release
 ```
 
 On first run, you'll be prompted to enter your Asana API token. Configuration is stored at:
+
 - macOS/Linux: `~/.config/asana-tui/config.yaml`
 - Windows: `%APPDATA%\asana-tui\config.yaml`
 
@@ -30,6 +31,8 @@ cargo test
 cargo fmt
 cargo clippy
 ```
+
+BY BENJAMIN
 
 ## License
 
